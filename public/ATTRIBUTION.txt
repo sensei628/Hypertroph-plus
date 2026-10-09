@@ -1,0 +1,42 @@
+hypertroph+ — data attributions & notices
+==========================================
+
+This application is an offline-first tool. It bundles only data that may be
+freely redistributed. Restricted third-party datasets are never bundled or
+distributed; when used, the user supplies them locally under their own licence.
+
+--------------------------------------------------------------------------------
+USDA FoodData Central
+--------------------------------------------------------------------------------
+Contains data from U.S. Department of Agriculture, Agricultural Research Service.
+FoodData Central. fdc.nal.usda.gov
+
+FoodData Central data are in the public domain and are not copyrighted. They are
+published under CC0 1.0 Universal (CC0 1.0). No permission is needed for their
+use, but USDA requests that users list FoodData Central as the source of the data.
+
+Bundled datasets:
+  * Foundation Foods (release 2026-04-30)
+  * SR Legacy (release 2018-04)
+  * Survey Foods / FNDDS (2021-2023)
+
+Licence: https://fdc.nal.usda.gov/api-guide.html
+
+--------------------------------------------------------------------------------
+hypertroph+ original data
+--------------------------------------------------------------------------------
+Seed/demo foods and exercises, muscle maps, and unit/prep taxonomies are original
+works authored for this project (© hypertroph+). They are not derived from any
+third-party database.
+
+--------------------------------------------------------------------------------
+Not bundled (user-supplied only)
+--------------------------------------------------------------------------------
+The following datasets are copyrighted and are NOT included in this repository or
+in the shipped application. Loaders are provided so users may import their own
+legally obtained copies locally:
+  * ICMR-NIN Indian Food Composition Tables 2017 (IFCT)
+  * ICMR-NIN Nutrient Requirements & RDA for Indians
+  * FSANZ AUSNUT / AFCD / NUTTAB (Australia)
+
+See DATA_LICENSES.md for the full register and terms.

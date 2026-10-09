@@ -1,5 +1,6 @@
 node_modules/
 dist/
+build/
 *.local
 .DS_Store
 *.db
@@ -14,3 +15,10 @@ public/hypertroph-ref.sqlite
 tools/import/.cache/
 *.sqlite
 *.sqlite-journal
+
+# Restricted / user-supplied datasets (copyrighted) — NEVER commit or bundle.
+# See DATA_LICENSES.md. Loaders are committed; the data stays local.
+Nutrition DB/
+**/Nutrition DB/
+*.xlsx
+*.pdf

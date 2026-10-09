@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "updated": "2026-10-09",
+  "comment": "Allowlist of every data source that may appear in hypertroph+. A source with redistribution 'allowed' may be bundled/committed; 'conditional' only under its stated condition; 'forbidden' may never be bundled (runtime/user data only). Enforced by tools/compliance/check-compliance.mjs.",
+  "sources": [
+    {
+      "id": "usda_fdc",
+      "aliases": ["s_usda"],
+      "name": "USDA FoodData Central",
+      "license": "CC0-1.0",
+      "licenseName": "Creative Commons Zero 1.0 Universal (Public Domain Dedication)",
+      "licenseUrl": "https://fdc.nal.usda.gov/api-guide.html",
+      "url": "https://fdc.nal.usda.gov/",
+      "redistribution": "allowed",
+      "attributionRequired": true,
+      "attribution": "U.S. Department of Agriculture, Agricultural Research Service. FoodData Central. fdc.nal.usda.gov",
+      "bundled": true
+    },
+    {
+      "id": "app_original",
+      "aliases": ["s_app"],
+      "name": "hypertroph+ original data",
+      "license": "original-work",
+      "licenseName": "Original work (project-owned)",
+      "url": null,
+      "redistribution": "allowed",
+      "attributionRequired": false,
+      "attribution": null,
+      "bundled": true
+    },
+    {
+      "id": "free_exercise_db",
+      "aliases": [],
+      "name": "Free Exercise DB (yuhonas)",
+      "license": "Unlicense",
+      "licenseUrl": "https://github.com/yuhonas/free-exercise-db",
+      "url": "https://github.com/yuhonas/free-exercise-db",
+      "redistribution": "allowed",
+      "attributionRequired": false,
+      "attribution": null,
+      "bundled": false,
+      "note": "Approved / public domain, but not currently bundled; seed exercises are app-authored."
+    },
+    {
+      "id": "open_food_facts",
+      "aliases": [],
+      "name": "Open Food Facts",
+      "license": "ODbL-1.0",
+      "licenseUrl": "https://opendatacommons.org/licenses/odbl/1-0/",
+      "url": "https://world.openfoodfacts.org/",
+      "redistribution": "conditional",
+      "attributionRequired": true,
+      "attribution": "Open Food Facts, https://world.openfoodfacts.org (ODbL)",
+      "condition": "Any derivative database must remain under ODbL; attribute OFF. Not bundled.",
+      "bundled": false
+    },
+    {
+      "id": "user",
+      "aliases": ["s_user"],
+      "name": "User-entered",
+      "license": "user",
+      "url": null,
+      "redistribution": "forbidden",
+      "attributionRequired": false,
+      "attribution": null,
+      "bundled": false,
+      "note": "Runtime-only user data. Never bundled or committed."
+    }
+  ],
+  "restricted": [
+    {
+      "id": "ifct2017",
+      "name": "ICMR-NIN Indian Food Composition Tables 2017",
+      "reason": "No part may be stored/reproduced in any electronic format for creating a product without prior written permission of NIN.",
+      "handling": "user-supplied only; never bundle or commit"
+    },
+    {
+      "id": "icmr_nin_rda",
+      "name": "ICMR-NIN Nutrient Requirements & RDA for Indians",
+      "reason": "Paid copyrighted publication.",
+      "handling": "user-supplied only; never bundle or commit"
+    },
+    {
+      "id": "fsanz",
+      "name": "FSANZ AUSNUT / AFCD / NUTTAB",
+      "reason": "Gated Data User Licence Agreement / CC BY-SA-ish / permission-only; no sublicensing.",
+      "handling": "user-supplied only; never bundle or commit"
+    }
+  ],
+  "forbiddenPatterns": ["ifct", "ausnut", "afcd", "nuttab", "fsanz", "nutrition db"],
+  "restrictedIgnoredPaths": ["Nutrition DB/", "tools/import/.cache/"]
+}

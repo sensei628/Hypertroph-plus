@@ -316,8 +316,8 @@ export class SqliteRepository implements DataPort {
       ]);
       this.run(
         `INSERT INTO log_items (id, local_date, meal_section, food_id, label, quantity_g, portion_label, source_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 's_usda', ?, ?)`,
-        [logId, input.localDate, input.mealSection, input.foodId, item.label, item.quantityG, input.portionLabel ?? null, now, now],
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [logId, input.localDate, input.mealSection, input.foodId, item.label, item.quantityG, input.portionLabel ?? null, food.sourceId, now, now],
       );
       for (const n of item.nutrients) {
         this.run(

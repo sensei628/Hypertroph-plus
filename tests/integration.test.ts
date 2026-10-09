@@ -49,8 +49,8 @@ describe('schema, seed & search', () => {
   it('carries provenance and preparation state on foods', () => {
     const food = repo.getFood('f_chicken');
     expect(food?.prepState).toBe('cooked');
-    expect(food?.sourceId).toBe('s_usda');
-    expect(food?.quality).toBe('verified');
+    expect(food?.sourceId).toBe('s_app');
+    expect(food?.quality).toBe('derived');
   });
 });
 

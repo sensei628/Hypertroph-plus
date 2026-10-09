@@ -32,6 +32,22 @@ npm.cmd run test     # 23 unit + integration tests
 > On this machine the PowerShell `npm` shim is blocked by execution policy; use `npm.cmd`
 > (or run the binaries under `node_modules\.bin\`).
 
+## Data & licensing
+
+hypertroph+ ships as an offline, redistributable product with **no paid licences**. The
+full provenance register is [`DATA_LICENSES.md`](./DATA_LICENSES.md).
+
+- **Bundled:** USDA FoodData Central (CC0 1.0, public domain) as
+  `public/hypertroph-ref.sqlite.gz`, plus app-authored data. Attribution is in
+  [`public/ATTRIBUTION.txt`](./public/ATTRIBUTION.txt).
+- **Not bundled (user-supplied only):** ICMR-NIN IFCT 2017 / RDA, and FSANZ
+  AUSNUT / AFCD / NUTTAB — copyrighted; loaders only, data imported locally and kept
+  out of git.
+
+`npm run data:compliance` (also run automatically by `npm run build`) fails the build if a
+source is unknown, a bundled asset is not approved, or any restricted data is tracked by
+git or present in `dist/`.
+
 ## What the base model proves
 
 1. **The schema works** against a real SQLite engine (`sql.js` WASM), including seeding,

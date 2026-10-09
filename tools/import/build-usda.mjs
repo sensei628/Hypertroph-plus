@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // One-command build of the bundled reference database from downloaded USDA JSON.
 // Downloads are expected in tools/import/.cache/usda (see download-usda.ps1).
-// Produces public/hypertroph-ref.sqlite (git-ignored) and public/hypertroph-ref.sqlite.gz (shipped).
+// Produces build/hypertroph-ref.sqlite (git-ignored intermediate) and
+// public/hypertroph-ref.sqlite.gz (the shipped asset).
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -11,8 +12,11 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
 const cache = process.env.USDA_DIR || path.join(__dirname, '.cache', 'usda');
-const out = path.join(repoRoot, 'public', 'hypertroph-ref.sqlite');
-const outGz = out + '.gz';
+const outDir = path.join(repoRoot, 'build');
+const out = path.join(outDir, 'hypertroph-ref.sqlite');
+const outGz = path.join(repoRoot, 'public', 'hypertroph-ref.sqlite.gz');
+
+fs.mkdirSync(outDir, { recursive: true });
 
 const datasets = [
   { dir: 'foundation', file: 'FoodData_Central_foundation_food_json_2026-04-30.json', datatype: 'Foundation', release: '2026-04-30', version: 'usda_foundation_2026-04-30' },

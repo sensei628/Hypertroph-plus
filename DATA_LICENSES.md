@@ -1,0 +1,105 @@
+# Data & licence register
+
+This file is the **single source of truth** for the provenance and licensing of every
+dataset that enters hypertroph+. It exists so the project can ship as an offline,
+redistributable product **without any paid licence**, and so no restricted third-party
+data is ever bundled or committed.
+
+Rules
+1. Only data with a licence that permits **free redistribution** may be bundled into
+   `public/` or committed to this repository.
+2. Every bundled dataset must appear in this register **and** in
+   `tools/compliance/approved-sources.json`.
+3. Restricted datasets are **user-supplied only**: a loader is committed, but the data
+   itself is imported locally at build time and never enters git or the shipped bundle.
+4. Unknown ≠ zero. No data is fabricated; values are copied verbatim from the source.
+
+`npm run data:compliance` enforces rules 1–3 automatically and fails the build otherwise.
+
+---
+
+## ✅ Approved — bundled (redistributable)
+
+### USDA FoodData Central — CC0 1.0 (public domain)
+- **Source:** U.S. Department of Agriculture, Agricultural Research Service —
+  <https://fdc.nal.usda.gov/>
+- **Licence:** CC0 1.0 Universal (Public Domain Dedication). Official statement
+  (<https://fdc.nal.usda.gov/api-guide.html>):
+  > "USDA FoodData Central data are in the public domain and they are not copyrighted.
+  > They are published under CC0 1.0 Universal (CC0 1.0). No permission is needed for
+  > their use, but we request that users list FoodData Central as the source of the data."
+- **Redistribution:** allowed. No permission required.
+- **Attribution (requested):** *U.S. Department of Agriculture, Agricultural Research
+  Service. FoodData Central. fdc.nal.usda.gov*
+- **Bundled artifact:** `public/hypertroph-ref.sqlite.gz`
+- **Datasets:** Foundation `2026-04-30` (363 foods), SR Legacy `2018-04` (7,793),
+  Survey/FNDDS `2021-2023` (5,432).
+
+### hypertroph+ original data — original work
+- **Source:** authored for this project (demo/seed foods and exercises, exercise
+  muscle maps, nutrient display order, unit/prep taxonomies).
+- **Redistribution:** allowed (the project owns it). Seed values are illustrative
+  app-authored figures; they are **not** claimed to be USDA records.
+- **Bundled artifact:** compiled into `db/seed.sql`.
+
+---
+
+## ⚠️ Conditional — approved only under stated terms
+
+### Open Food Facts — ODbL 1.0 + DbCL 1.0
+- **Licence:** Open Database Licence + Database Contents Licence (share-alike);
+  product images CC-BY-SA.
+- **Condition:** a derivative *database* must itself be released under ODbL and Open
+  Food Facts must be attributed. Not bundled today; if bundled, the reference DB (or a
+  separate OFF pack) must comply.
+- **Decision:** **not bundled** at this time.
+
+### Free Exercise DB (yuhonas) — The Unlicense (public domain)
+- **Source:** <https://github.com/yuhonas/free-exercise-db> (verified Unlicense via the
+  GitHub licence API).
+- **Redistribution:** allowed (public domain).
+- **Decision:** **approved but not bundled** — the seed exercises are app-authored, not
+  sourced from this project. It remains a clean candidate for future expansion.
+
+---
+
+## ⛔ Restricted — NOT bundled (user-supplied only)
+
+These are copyrighted and may **not** be stored/reproduced in any electronic product or
+committed to this repository. A loader may be provided; the data stays local.
+
+### ICMR-NIN — Indian Food Composition Tables 2017 (IFCT)
+- **Copyright:** © 2017 National Institute of Nutrition, ICMR (Government of India).
+- **Terms (verbatim):** "The use and dissemination of the data in this book is encouraged.
+  This publication can be reproduced for personal use with full acknowledgment of the
+  source. **However, no part of this publication can be stored or reproduced in any
+  electronic format for creating a product without the prior written permission of the
+  National Institute of Nutrition, Hyderabad.**"
+- **Handling:** user-supplied at build time; never bundled, never committed.
+
+### ICMR-NIN — Nutrient Requirements & Recommended Dietary Allowances for Indians (RDA/EAR)
+- **Copyright:** paid, copyrighted publication (ICMR-NIN).
+- **Handling:** user-supplied at build time; never bundled, never committed.
+
+### FSANZ — AUSNUT / AFCD / NUTTAB (Australia)
+- **AFCD:** gated *Data User Licence Agreement* (CC BY-SA 3.0 AU **based**, no
+  sublicensing, requires accepting terms + a limitation-of-data statement).
+- **AUSNUT 2007:** permission-only, personal/non-commercial use.
+- **AUSNUT 2011-13:** CC BY 3.0 AU with third-party exceptions.
+- **Handling:** user-supplied at build time; never bundled, never committed.
+
+### Other proprietary references (ExRx, paid app DBs, RP/Israetel programs)
+- Proprietary / all rights reserved. No scraping, no redistribution, no copying of
+  protected content. Reference concepts only.
+
+---
+
+## How restricted data is kept out
+- Restricted source files live in **git-ignored** caches (`Nutrition DB/`,
+  `tools/import/.cache/`).
+- `tools/compliance/check-compliance.mjs` fails the build if a restricted name appears
+  in a bundled asset or in `dist/`, if a source id is unknown, or if any restricted file
+  is tracked by git.
+
+## Attribution
+Bundled attribution text ships in `public/ATTRIBUTION.txt` and is surfaced in the app.

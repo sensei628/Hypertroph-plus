@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const file = path.resolve(repoRoot, process.argv[2] || 'public/hypertroph-ref.sqlite');
+const file = path.resolve(repoRoot, process.argv[2] || 'build/hypertroph-ref.sqlite');
 const term = process.argv[3] || 'rice';
 
 function normalizeKey(s) {

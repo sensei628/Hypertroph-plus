@@ -8,6 +8,59 @@ export type DB = Database;
 
 const PERSIST_KEY = 'hypertroph.db.v1';
 
+// Schema/data migrations applied to existing (persisted) databases. Version 1 is
+// the initial schema+seed; later versions are idempotent data/provenance fixes.
+const MIGRATIONS: { version: number; sql: string }[] = [
+  {
+    // Compliance/provenance fix: hand-authored demo foods & exercises were
+    // mislabeled as third-party sources. Reassign them to the app-owned source
+    // and drop the misleading source row / brand.
+    version: 2,
+    sql: `
+      INSERT OR IGNORE INTO sources (id, name, license, license_url, attribution, redistribution, pack_version, retrieved_at)
+      VALUES ('s_app','hypertroph+ original data','original-work',NULL,'Demo/seed data authored for hypertroph+ (not third-party).','allowed','base-model-1',1700000000000);
+      UPDATE foods SET source_id = 's_app', data_quality = 'derived'
+        WHERE source_id = 's_unlicense' OR (source_id = 's_usda' AND source_record_id LIKE 'seed-%');
+      UPDATE exercises SET source_id = 's_app' WHERE source_id = 's_unlicense';
+      UPDATE foods SET brand = NULL WHERE id = 'f_whey' AND brand = 'MyProtein';
+      DELETE FROM sources WHERE id = 's_unlicense';
+    `,
+  },
+];
+
+function applyMigrations(db: DB): boolean {
+  let current = 0;
+  try {
+    const stmt = db.prepare('SELECT MAX(version) AS v FROM schema_migrations');
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as { v: number | null };
+      current = row.v ?? 0;
+    }
+    stmt.free();
+  } catch {
+    return false;
+  }
+  let changed = false;
+  for (const m of MIGRATIONS) {
+    if (m.version <= current) continue;
+    db.run('BEGIN');
+    try {
+      db.run(m.sql);
+      db.run('INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)', [
+        m.version,
+        Date.now(),
+        `compliance-v${m.version}`,
+      ]);
+      db.run('COMMIT');
+      changed = true;
+    } catch (e) {
+      db.run('ROLLBACK');
+      throw e;
+    }
+  }
+  return changed;
+}
+
 let sqlStatic: SqlJsStatic | null = null;
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -47,6 +100,7 @@ export async function loadDatabase(): Promise<DB> {
   const storage = getStorage();
   const stored = storage?.getItem(PERSIST_KEY);
   let db: DB;
+  let fresh = false;
 
   if (stored) {
     db = new sqlStatic.Database(base64ToBytes(stored));
@@ -54,10 +108,12 @@ export async function loadDatabase(): Promise<DB> {
     db = new sqlStatic.Database();
     db.run(schemaSql);
     db.run(seedSql);
-    persist(db);
+    fresh = true;
   }
 
   db.run('PRAGMA foreign_keys = ON;');
+  const migrated = applyMigrations(db);
+  if (fresh || migrated) persist(db);
   return db;
 }
 

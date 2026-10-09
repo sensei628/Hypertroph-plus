@@ -6,7 +6,7 @@
 //
 // Usage:
 //   node tools/import/import-usda.mjs \
-//     --in  <path-to-FDC-*-json-file> --out public/hypertroph-ref.sqlite \
+//     --in  <path-to-FDC-*-json-file> --out build/hypertroph-ref.sqlite \
 //     --source usda_fdc --datatype "Foundation" --release 2026-04-30 \
 //     --version usda_foundation_2026-04-30
 //
@@ -29,7 +29,7 @@ function arg(name, def = undefined) {
 const flag = (name) => process.argv.includes(`--${name}`);
 
 const inFile = arg('in');
-const outFile = path.resolve(repoRoot, arg('out', 'public/hypertroph-ref.sqlite'));
+const outFile = path.resolve(repoRoot, arg('out', 'build/hypertroph-ref.sqlite'));
 const sourceId = arg('source', 'usda_fdc');
 const dataType = arg('datatype');
 const release = arg('release', '');

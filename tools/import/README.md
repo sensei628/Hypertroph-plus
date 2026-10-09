@@ -7,7 +7,8 @@ The app ships a single reference DB asset built here:
 
 - `public/hypertroph-ref.sqlite.gz` — gzipped SQLite, loaded + decompressed in the
   browser at startup (`DecompressionStream`) and opened with sql.js.
-- `public/hypertroph-ref.sqlite` — the uncompressed build artifact (git-ignored).
+- `build/hypertroph-ref.sqlite` — the uncompressed build artifact (git-ignored
+  intermediate; kept out of `public/` so it is never shipped in `dist/`).
 
 ## USDA FoodData Central
 
@@ -54,7 +55,7 @@ For a single archive (used by the orchestrator, also callable directly):
 
 ```powershell
 node tools/import/import-usda.mjs `
-  --in  <FDC-json-file> --out public/hypertroph-ref.sqlite `
+  --in  <FDC-json-file> --out build/hypertroph-ref.sqlite `
   --datatype "Foundation" --release 2026-04-30 --version usda_foundation_2026-04-30
 ```
 

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "comment": "Every data asset that is shipped in public/ and therefore in the built bundle. Each entry must reference an approved source id. Enforced by tools/compliance/check-compliance.mjs.",
+  "assets": [
+    {
+      "path": "public/hypertroph-ref.sqlite.gz",
+      "sourceId": "usda_fdc",
+      "description": "USDA FDC reference database: Foundation + SR Legacy + FNDDS (13,588 foods)."
+    }
+  ],
+  "appOwned": [
+    {
+      "path": "public/ATTRIBUTION.txt",
+      "sourceId": "app_original",
+      "description": "Attribution/notice text."
+    },
+    {
+      "path": "db/seed.sql",
+      "sourceId": "app_original",
+      "description": "App-authored seed/demo data."
+    }
+  ]
+}
