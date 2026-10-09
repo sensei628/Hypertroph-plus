@@ -15,8 +15,8 @@ import { LogItem, sumNutrients, snapshotLogItem } from '../domain/nutrition';
 import { gToKg, gToLb, kgToG, lbToG, e1rmG } from '../domain/training';
 import { CommandPalette } from './CommandPalette';
 
-type View = 'dashboard' | 'diary' | 'training' | 'progress' | 'settings';
-type PaletteTarget = 'log' | 'workout';
+type Section = 'nutrition' | 'training' | 'settings';
+type PaletteMode = 'food' | 'exercise';
 
 const MEALS = ['breakfast', 'lunch', 'dinner', 'snack'] as const;
 const SUMMARY_NUTRIENTS = ['energy_kcal', 'protein_g', 'carb_g', 'fat_g'];
@@ -54,7 +54,7 @@ function rowsToTotals(items: DayItemRow[]) {
 export function App() {
   const [repo, setRepo] = useState<SqliteRepository | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<View>('dashboard');
+  const [section, setSection] = useState<Section>('nutrition');
   const [date, setDate] = useState<string>(toISODate(new Date()));
 
   const [nutrientDefs, setNutrientDefs] = useState<NutrientDef[]>([]);
@@ -68,7 +68,7 @@ export function App() {
   const [activeWorkout, setActiveWorkout] = useState<WorkoutRow | null>(null);
   const [weeklyVolume, setWeeklyVolume] = useState<Map<string, number>>(new Map());
 
-  const [palette, setPalette] = useState<{ open: boolean; mode: 'food' | 'exercise'; target: PaletteTarget } | null>(null);
+  const [palette, setPalette] = useState<PaletteMode | null>(null);
   const [logTarget, setLogTarget] = useState<FoodDetail | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -114,6 +114,19 @@ export function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Context-aware Ctrl/Cmd-K: foods in Nutrition, exercises in Training.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        if (section !== 'nutrition' && section !== 'training') return;
+        e.preventDefault();
+        setPalette(section === 'nutrition' ? 'food' : 'exercise');
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [section]);
+
   const totals = useMemo(() => rowsToTotals(dayItems), [dayItems]);
 
   const defById = useMemo(() => {
@@ -124,6 +137,11 @@ export function App() {
 
   const searchFoods = useCallback((q: string) => repo?.searchFoods(q, 20) ?? [], [repo]);
   const searchExercises = useCallback((q: string) => repo?.searchExercises(q, 20) ?? [], [repo]);
+
+  function go(next: Section) {
+    setSection(next);
+    setPalette(null);
+  }
 
   function openLog(food: FoodSummary) {
     if (!repo) return;
@@ -136,9 +154,8 @@ export function App() {
     if (!repo) return;
     let wo = activeWorkout;
     if (!wo) {
-      const id = repo.startWorkout('Workout', date, -new Date().getTimezoneOffset());
+      repo.startWorkout('Workout', date, -new Date().getTimezoneOffset());
       wo = repo.getActiveWorkout(date);
-      void id;
     }
     if (wo) {
       repo.addExercise(wo.id, ex.id);
@@ -146,11 +163,6 @@ export function App() {
       setToast(`Added ${ex.name}`);
     }
     setPalette(null);
-  }
-
-  function handlePickFood(f: FoodSummary) {
-    if (palette?.target === 'workout') return;
-    openLog(f);
   }
 
   function logFood(detail: FoodDetail, quantityG: number, portionLabel: string, meal: string) {
@@ -165,7 +177,7 @@ export function App() {
     refresh();
   }
 
-  async function startWorkout() {
+  function startWorkout() {
     if (!repo) return;
     repo.startWorkout('Workout', date, -new Date().getTimezoneOffset());
     refresh();
@@ -249,45 +261,40 @@ export function App() {
           hypertroph<span>+</span>
         </div>
         <div className="nav">
-          {(['dashboard', 'diary', 'training', 'progress', 'settings'] as View[]).map((v) => (
-            <button key={v} className={view === v ? 'active' : ''} onClick={() => setView(v)}>
-              {v[0].toUpperCase() + v.slice(1)}
-            </button>
-          ))}
+          <button className={section === 'nutrition' ? 'active' : ''} onClick={() => go('nutrition')}>
+            Nutrition
+          </button>
+          <button className={section === 'training' ? 'active' : ''} onClick={() => go('training')}>
+            Training
+          </button>
         </div>
         <div className="spacer" />
-        <button className="primary" onClick={() => setPalette({ open: true, mode: 'food', target: 'log' })}>
-          Log food <span className="kbd">Ctrl K</span>
+        {section === 'nutrition' && (
+          <button className="primary" onClick={() => setPalette('food')}>
+            Log food <span className="kbd">Ctrl K</span>
+          </button>
+        )}
+        {section === 'training' && (
+          <button className="primary" onClick={() => setPalette('exercise')}>
+            Add exercise <span className="kbd">Ctrl K</span>
+          </button>
+        )}
+        <button className={section === 'settings' ? 'active' : ''} onClick={() => go('settings')}>
+          Settings
         </button>
       </div>
 
       <div className="content">
-        {view === 'dashboard' && (
-          <Dashboard
-            date={date}
-            setDate={setDate}
-            totals={totals}
-            targets={targets}
-            defById={defById}
-            activeWorkout={activeWorkout}
-            weeklyVolume={weeklyVolume}
-            muscleNames={muscleNames}
-            onStartWorkout={startWorkout}
-            onOpenFood={() => setPalette({ open: true, mode: 'food', target: 'log' })}
-            onOpenExercise={() => setPalette({ open: true, mode: 'exercise', target: 'workout' })}
-          />
-        )}
-
-        {view === 'diary' && (
-          <Diary
+        {section === 'nutrition' && (
+          <NutritionSection
             date={date}
             setDate={setDate}
             items={dayItems}
             totals={totals}
-            defById={defById}
             targets={targets}
+            defById={defById}
             recentFoods={recentFoods}
-            onAddFood={() => setPalette({ open: true, mode: 'food', target: 'log' })}
+            onAddFood={() => setPalette('food')}
             onPickRecent={openLog}
             onDelete={(id) => {
               repo.deleteLogItem(id);
@@ -297,20 +304,21 @@ export function App() {
           />
         )}
 
-        {view === 'training' && (
-          <Training
+        {section === 'training' && (
+          <TrainingSection
             activeWorkout={activeWorkout}
             units={units}
+            weeklyVolume={weeklyVolume}
+            muscleNames={muscleNames}
+            secondaryFactor={secondaryFactor}
             onStart={startWorkout}
-            onAddExercise={() => setPalette({ open: true, mode: 'exercise', target: 'workout' })}
+            onAddExercise={() => setPalette('exercise')}
             onAddSet={addSet}
             onFinish={finishWorkout}
           />
         )}
 
-        {view === 'progress' && <Progress weeklyVolume={weeklyVolume} muscleNames={muscleNames} secondaryFactor={secondaryFactor} />}
-
-        {view === 'settings' && (
+        {section === 'settings' && (
           <Settings
             units={units}
             onChangeUnits={changeUnits}
@@ -326,12 +334,12 @@ export function App() {
         )}
       </div>
 
-      {palette?.open && (
+      {palette && (
         <CommandPalette
-          initialMode={palette.mode}
+          mode={palette}
           searchFoods={searchFoods}
           searchExercises={searchExercises}
-          onPickFood={handlePickFood}
+          onPickFood={openLog}
           onPickExercise={openExerciseInWorkout}
           onClose={() => setPalette(null)}
         />
@@ -354,132 +362,28 @@ export function App() {
   );
 }
 
-// ── Dashboard ───────────────────────────────────────────────
-function Dashboard(props: {
-  date: string;
-  setDate: (d: string) => void;
-  totals: Map<string, { sumMilli: number; hasUnknown: boolean }>;
-  targets: Map<string, number>;
-  defById: Map<string, NutrientDef>;
-  activeWorkout: WorkoutRow | null;
-  weeklyVolume: Map<string, number>;
-  muscleNames: Map<string, string>;
-  onStartWorkout: () => void;
-  onOpenFood: () => void;
-  onOpenExercise: () => void;
-}) {
-  const { totals, targets } = props;
-  const kcal = totals.get('energy_kcal');
-  const kcalTarget = targets.get('energy_kcal');
-  const pct = kcal && kcalTarget ? Math.min(100, (kcal.sumMilli / kcalTarget) * 100) : 0;
-
-  return (
-    <>
-      <div className="row">
-        <h2>Today · {props.date}</h2>
-        <div className="nav">
-          <button className="ghost" onClick={() => props.setDate(addDays(props.date, -1))}>
-            ‹
-          </button>
-          <button className="ghost" onClick={() => props.setDate(addDays(props.date, 1))}>
-            ›
-          </button>
-        </div>
-      </div>
-      <div className="grid" style={{ marginTop: 12 }}>
-        <div className="card">
-          <h3>Nutrition</h3>
-          <div className="row">
-            <strong className="mono">
-              {kcal ? formatNutrient(kcal.sumMilli, 'kcal') : '0'} / {kcalTarget ? formatNutrient(kcalTarget, 'kcal') : '—'} kcal
-            </strong>
-            {kcal?.hasUnknown && <span className="tag partial">partial data</span>}
-          </div>
-          <div className="bar">
-            <div style={{ width: `${pct}%` }} />
-          </div>
-          {SUMMARY_NUTRIENTS.filter((n) => n !== 'energy_kcal').map((n) => {
-            const t = totals.get(n);
-            const target = targets.get(n);
-            const def = props.defById.get(n);
-            const p = t && target ? Math.min(100, (t.sumMilli / target) * 100) : 0;
-            return (
-              <div key={n}>
-                <div className="row small">
-                  <span className="muted">{def?.name ?? n}</span>
-                  <span className="mono">
-                    {t ? formatNutrient(t.sumMilli, def?.unit ?? 'g') : '0'} / {target ? formatNutrient(target, def?.unit ?? 'g') : '—'}
-                  </span>
-                </div>
-                <div className={`bar ${n === 'protein_g' ? 'protein' : n === 'fat_g' ? 'fat' : ''}`}>
-                  <div style={{ width: `${p}%` }} />
-                </div>
-              </div>
-            );
-          })}
-          <button className="primary" style={{ marginTop: 8 }} onClick={props.onOpenFood}>
-            + Log food
-          </button>
-        </div>
-
-        <div className="card">
-          <h3>Training</h3>
-          {props.activeWorkout ? (
-            <>
-              <p>
-                In progress: <strong>{props.activeWorkout.name}</strong>
-              </p>
-              <p className="muted small">{props.activeWorkout.exercises.length} exercises logged</p>
-            </>
-          ) : (
-            <p className="muted">No workout in progress.</p>
-          )}
-          <div className="nav" style={{ marginTop: 8 }}>
-            <button className="primary" onClick={props.onStartWorkout}>
-              Start workout
-            </button>
-            <button className="ghost" onClick={props.onOpenExercise}>
-              + Exercise
-            </button>
-          </div>
-        </div>
-
-        <div className="card">
-          <h3>Weekly volume (working sets)</h3>
-          {[...props.weeklyVolume.entries()]
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 6)
-            .map(([m, v]) => (
-              <div key={m} className="row small">
-                <span className="muted">{props.muscleNames.get(m) ?? m}</span>
-                <span className="mono">{v.toFixed(1)}</span>
-              </div>
-            ))}
-          {props.weeklyVolume.size === 0 && <p className="muted small">Log working sets to see volume.</p>}
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ── Diary ───────────────────────────────────────────────────
-function Diary(props: {
+// ── Nutrition ───────────────────────────────────────────────
+function NutritionSection(props: {
   date: string;
   setDate: (d: string) => void;
   items: DayItemRow[];
   totals: Map<string, { sumMilli: number; hasUnknown: boolean }>;
-  defById: Map<string, NutrientDef>;
   targets: Map<string, number>;
+  defById: Map<string, NutrientDef>;
   recentFoods: FoodSummary[];
   onAddFood: () => void;
   onPickRecent: (f: FoodSummary) => void;
   onDelete: (id: string) => void;
   onCreateCustom: () => void;
 }) {
+  const kcal = props.totals.get('energy_kcal');
+  const kcalTarget = props.targets.get('energy_kcal');
+  const pct = kcal && kcalTarget ? Math.min(100, (kcal.sumMilli / kcalTarget) * 100) : 0;
+
   return (
     <>
       <div className="row">
-        <h2>Diary · {props.date}</h2>
+        <h2>Nutrition · {props.date}</h2>
         <div className="nav">
           <button className="ghost" onClick={() => props.setDate(addDays(props.date, -1))}>
             ‹ prev
@@ -531,20 +435,38 @@ function Diary(props: {
         </div>
 
         <div className="card">
-          <h3>Day total</h3>
-          {SUMMARY_NUTRIENTS.map((n) => {
+          <h3>Daily targets</h3>
+          <div className="row">
+            <strong className="mono">
+              {kcal ? formatNutrient(kcal.sumMilli, 'kcal') : '0'} / {kcalTarget ? formatNutrient(kcalTarget, 'kcal') : '—'} kcal
+            </strong>
+            {kcal?.hasUnknown && <span className="tag partial">partial data</span>}
+          </div>
+          <div className="bar">
+            <div style={{ width: `${pct}%` }} />
+          </div>
+          {SUMMARY_NUTRIENTS.filter((n) => n !== 'energy_kcal').map((n) => {
             const t = props.totals.get(n);
+            const target = props.targets.get(n);
             const def = props.defById.get(n);
+            const p = t && target ? Math.min(100, (t.sumMilli / target) * 100) : 0;
             return (
-              <div key={n} className="row">
-                <span className="muted">{def?.name ?? n}</span>
-                <span className="mono">
-                  {formatNutrient(t?.sumMilli ?? null, def?.unit ?? 'g')} {t?.hasUnknown ? <span className="tag partial">partial</span> : null}
-                </span>
+              <div key={n}>
+                <div className="row small">
+                  <span className="muted">{def?.name ?? n}</span>
+                  <span className="mono">
+                    {t ? formatNutrient(t.sumMilli, def?.unit ?? 'g') : '0'} / {target ? formatNutrient(target, def?.unit ?? 'g') : '—'}
+                  </span>
+                </div>
+                <div className={`bar ${n === 'protein_g' ? 'protein' : n === 'fat_g' ? 'fat' : ''}`}>
+                  <div style={{ width: `${p}%` }} />
+                </div>
               </div>
             );
           })}
-          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '12px 0' }} />
+        </div>
+
+        <div className="card">
           <h3>Recent</h3>
           {props.recentFoods.map((f) => (
             <div key={f.id} className="row small">
@@ -564,50 +486,59 @@ function Diary(props: {
 }
 
 // ── Training ────────────────────────────────────────────────
-function Training(props: {
+function TrainingSection(props: {
   activeWorkout: WorkoutRow | null;
   units: 'kg' | 'lb';
+  weeklyVolume: Map<string, number>;
+  muscleNames: Map<string, string>;
+  secondaryFactor: number;
   onStart: () => void;
   onAddExercise: () => void;
   onAddSet: (we: WorkoutExerciseRow, load: string, reps: string, rir: string, setType: 'working' | 'warmup') => void;
   onFinish: () => void;
 }) {
-  if (!props.activeWorkout) {
-    return (
-      <>
-        <h2>Training</h2>
-        <div className="card" style={{ marginTop: 12 }}>
-          <p className="muted">No active workout. Start one to log sets.</p>
-          <button className="primary" onClick={props.onStart}>
-            Start workout
-          </button>
-        </div>
-      </>
-    );
-  }
   return (
     <>
       <div className="row">
-        <h2>{props.activeWorkout.name}</h2>
-        <div className="nav">
-          <button className="ghost" onClick={props.onAddExercise}>
-            + Exercise
-          </button>
-          <button className="primary" onClick={props.onFinish}>
-            Finish
-          </button>
-        </div>
-      </div>
-      <div className="grid" style={{ marginTop: 12 }}>
-        {props.activeWorkout.exercises.map((we) => (
-          <ExerciseCard key={we.id} we={we} units={props.units} onAddSet={props.onAddSet} />
-        ))}
-        {props.activeWorkout.exercises.length === 0 && (
-          <div className="card">
-            <p className="muted">Add an exercise to begin.</p>
+        <h2>{props.activeWorkout ? props.activeWorkout.name : 'Training'}</h2>
+        {props.activeWorkout && (
+          <div className="nav">
+            <button className="ghost" onClick={props.onAddExercise}>
+              + Exercise
+            </button>
+            <button className="primary" onClick={props.onFinish}>
+              Finish
+            </button>
           </div>
         )}
       </div>
+
+      {!props.activeWorkout ? (
+        <div className="card" style={{ marginTop: 12 }}>
+          <p className="muted">No active workout. Start one to log sets.</p>
+          <div className="nav" style={{ marginTop: 8 }}>
+            <button className="primary" onClick={props.onStart}>
+              Start workout
+            </button>
+            <button className="ghost" onClick={props.onAddExercise}>
+              + Exercise
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid" style={{ marginTop: 12 }}>
+          {props.activeWorkout.exercises.map((we) => (
+            <ExerciseCard key={we.id} we={we} units={props.units} onAddSet={props.onAddSet} />
+          ))}
+          {props.activeWorkout.exercises.length === 0 && (
+            <div className="card">
+              <p className="muted">Add an exercise to begin.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <Progress weeklyVolume={props.weeklyVolume} muscleNames={props.muscleNames} secondaryFactor={props.secondaryFactor} />
     </>
   );
 }
@@ -678,7 +609,7 @@ function Progress(props: { weeklyVolume: Map<string, number>; muscleNames: Map<s
   const rows = [...props.weeklyVolume.entries()].sort((a, b) => b[1] - a[1]);
   return (
     <>
-      <h2>Weekly working-set volume</h2>
+      <h2 style={{ marginTop: 20 }}>Weekly working-set volume</h2>
       <p className="muted small">Primary sets counted 1×; secondary counted {props.secondaryFactor}×. Warm-up sets excluded.</p>
       <div className="card" style={{ marginTop: 12 }}>
         {rows.length === 0 && <p className="muted">No working sets logged this week.</p>}
@@ -713,7 +644,7 @@ function Settings(props: {
       <h2>Settings</h2>
       <div className="grid" style={{ marginTop: 12 }}>
         <div className="card">
-          <h3>Units & preferences</h3>
+          <h3>Units</h3>
           <div className="row">
             <span>Weight units</span>
             <div className="nav">
@@ -725,7 +656,11 @@ function Settings(props: {
               </button>
             </div>
           </div>
-          <div className="row" style={{ marginTop: 10 }}>
+        </div>
+
+        <div className="card">
+          <h3>Training</h3>
+          <div className="row">
             <span>Secondary volume factor</span>
             <input
               type="number"

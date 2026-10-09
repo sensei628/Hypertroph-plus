@@ -4,7 +4,7 @@ import type { ExerciseSummary, FoodSummary } from '../data/repository';
 type Mode = 'food' | 'exercise';
 
 interface Props {
-  initialMode: Mode;
+  mode: Mode;
   searchFoods: (q: string) => FoodSummary[];
   searchExercises: (q: string) => ExerciseSummary[];
   onPickFood: (food: FoodSummary) => void;
@@ -12,8 +12,7 @@ interface Props {
   onClose: () => void;
 }
 
-export function CommandPalette({ initialMode, searchFoods, searchExercises, onPickFood, onPickExercise, onClose }: Props) {
-  const [mode, setMode] = useState<Mode>(initialMode);
+export function CommandPalette({ mode, searchFoods, searchExercises, onPickFood, onPickExercise, onClose }: Props) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -28,7 +27,7 @@ export function CommandPalette({ initialMode, searchFoods, searchExercises, onPi
 
   useEffect(() => {
     setActive(0);
-  }, [query, mode]);
+  }, [query]);
 
   function choose() {
     if (mode === 'food' && foods[active]) onPickFood(foods[active]);
@@ -46,9 +45,6 @@ export function CommandPalette({ initialMode, searchFoods, searchExercises, onPi
     } else if (e.key === 'Enter') {
       e.preventDefault();
       choose();
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      setMode((m) => (m === 'food' ? 'exercise' : 'food'));
     }
   }
 
@@ -91,15 +87,8 @@ export function CommandPalette({ initialMode, searchFoods, searchExercises, onPi
           {count === 0 && <div className="result muted">No matches. {mode === 'food' ? 'Try “Create custom food”.' : 'Custom exercise coming next.'}</div>}
         </div>
         <div className="tabs">
-          <button className={mode === 'food' ? 'primary' : 'ghost'} onClick={() => setMode('food')}>
-            Foods
-          </button>
-          <button className={mode === 'exercise' ? 'primary' : 'ghost'} onClick={() => setMode('exercise')}>
-            Exercises
-          </button>
+          <span className="small muted">{mode === 'food' ? 'Logging food' : 'Logging exercise'}</span>
           <span className="spacer" />
-          <span className="kbd">Tab</span>
-          <span className="small muted">switch ·</span>
           <span className="kbd">↑↓</span>
           <span className="small muted">move ·</span>
           <span className="kbd">Enter</span>

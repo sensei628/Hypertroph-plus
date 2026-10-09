@@ -104,6 +104,11 @@ select {
   border-color: var(--border);
 }
 
+.topbar > button.active {
+  background: var(--panel-2);
+  border-color: var(--border);
+}
+
 .spacer {
   flex: 1;
 }
