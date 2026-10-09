@@ -68,4 +68,13 @@ describe.skipIf(!hasRef)('reference pack integration (USDA CC0)', () => {
 
     expect(repo.recentFoods(10).some((f) => f.name === hit.name)).toBe(true);
   });
+
+  it('reports catalogue size and lets the empty-query browse reach ref foods', () => {
+    expect(repo.countFoods('')).toBeGreaterThanOrEqual(13500);
+    expect(repo.countFoods('chicken')).toBeGreaterThanOrEqual(5);
+    expect(repo.countFoods('zzzzznope')).toBe(0);
+    const browse = repo.searchFoods('');
+    expect(browse.length).toBe(25);
+    expect(browse.some((f) => f.id.startsWith('usda:'))).toBe(true);
+  });
 });

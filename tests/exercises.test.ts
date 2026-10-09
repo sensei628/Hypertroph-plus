@@ -42,6 +42,12 @@ describe('Free Exercise DB catalogue (Unlicense)', () => {
     expect(names.get('lats')).toBe('Lats');
   });
 
+  it('reports catalogue size for the palette hints', () => {
+    expect(repo.countExercises('')).toBeGreaterThanOrEqual(850);
+    expect(repo.countExercises('lateral raise')).toBeGreaterThan(0);
+    expect(repo.countExercises('zzzzznope')).toBe(0);
+  });
+
   it('is idempotent when the SQL runs twice', () => {
     const before = repo.searchExercises('', 5000).length;
     db.run(exercisesSql);

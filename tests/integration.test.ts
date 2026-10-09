@@ -86,6 +86,20 @@ describe('logging with snapshots', () => {
   });
 });
 
+describe('custom meals', () => {
+  it('accepts user-defined meal sections and surfaces them', () => {
+    repo.logFood({ foodId: 'f_chicken', quantityG: 100, mealSection: 'late-night snack', localDate: DATE });
+    expect(repo.getUsedMealSections()).toContain('late-night snack');
+    const rows = db.exec("SELECT COUNT(*) FROM log_items WHERE meal_section = 'late-night snack'")[0].values[0][0];
+    expect(rows).toBe(1);
+  });
+
+  it('persists the meal list round-trip through preferences', () => {
+    repo.setPreference('meals', ['breakfast', 'lunch', 'dinner', 'snack']);
+    expect(JSON.parse(repo.getPreference('meals', ''))).toEqual(['breakfast', 'lunch', 'dinner', 'snack']);
+  });
+});
+
 describe('training, PRs and volume', () => {
   it('logs a workout, detects a PR, and reports weekly volume', () => {
     const workoutId = repo.startWorkout('Push', DATE);

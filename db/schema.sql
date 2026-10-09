@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS log_days (
 CREATE TABLE IF NOT EXISTS log_items (
   id            TEXT PRIMARY KEY,
   local_date    TEXT NOT NULL REFERENCES log_days(local_date),
-  meal_section  TEXT NOT NULL CHECK (meal_section IN ('breakfast','lunch','dinner','snack','other')),
+  meal_section  TEXT NOT NULL,
   food_id       TEXT REFERENCES foods(id),
   label         TEXT NOT NULL,
   quantity_g    REAL,

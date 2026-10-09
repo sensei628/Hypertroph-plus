@@ -138,9 +138,10 @@ export interface DataPort {
   getTargets(): Map<string, Milli>;
   setTarget(nutrientId: string, targetMilli: Milli | null): void;
   getPreference(key: string, fallback: string): string;
-  setPreference(key: string, value: string): void;
+  setPreference(key: string, value: string | readonly string[]): void;
 
   searchFoods(query: string, limit?: number): FoodSummary[];
+  countFoods(query: string): number;
   getFood(id: string): FoodDetail | null;
   recentFoods(limit?: number): FoodSummary[];
   createCustomFood(name: string, nutrients: NutrientValue[]): FoodDetail;
@@ -155,8 +156,10 @@ export interface DataPort {
   }): void;
   getDayItems(localDate: string): DayItemRow[];
   deleteLogItem(id: string): void;
+  getUsedMealSections(): string[];
 
   searchExercises(query: string, limit?: number): ExerciseSummary[];
+  countExercises(query: string): number;
   getExerciseMuscles(id: string): { primary: string[]; secondary: string[] };
   getMuscleNames(): Map<string, string>;
 
@@ -228,7 +231,7 @@ export class SqliteRepository implements DataPort {
     return r ? r.value.replace(/^"|"$/g, '') : fallback;
   }
 
-  setPreference(key: string, value: string): void {
+  setPreference(key: string, value: string | readonly string[]): void {
     this.run(
       `INSERT INTO preferences (key, value, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
@@ -242,11 +245,14 @@ export class SqliteRepository implements DataPort {
     const key = normalizeKey(query);
     const excludeRef = this.ref ? " AND source_id <> 's_usda'" : '';
     if (!key) {
-      return this.rows<Record<string, unknown>>(
+      // Browsing the catalogue (empty query): list local foods, then fill from
+      // the reference pack so the full catalog is reachable without typing.
+      const local = this.rows<Record<string, unknown>>(
         `SELECT id, canonical_name, brand, prep_state, basis, data_quality, source_id FROM foods
          WHERE is_deleted = 0${excludeRef} ORDER BY canonical_name LIMIT ?`,
         [limit],
       ).map(mapFood);
+      return [...local, ...this.refBrowse(limit - local.length)];
     }
     const like = `%${key}%`;
     const prefix = `${key}%`;
@@ -268,13 +274,48 @@ export class SqliteRepository implements DataPort {
     return [...local, ...this.refSearch(key, remaining)];
   }
 
+  /** Total foods matching a query (mirrors searchFoods' criteria). */
+  countFoods(query: string): number {
+    const key = normalizeKey(query);
+    const excludeRef = this.ref ? " AND source_id <> 's_usda'" : '';
+    if (!key) {
+      const local = this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM foods WHERE is_deleted = 0${excludeRef}`)[0]?.n ?? 0;
+      const ref = this.ref ? this.refRows<{ n: number }>('SELECT COUNT(*) AS n FROM foods')[0].n : 0;
+      return local + ref;
+    }
+    const like = `%${key}%`;
+    const local =
+      this.rows<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM foods f
+         WHERE f.is_deleted = 0${excludeRef}
+           AND (f.search_key LIKE ? OR f.id IN (SELECT food_id FROM food_aliases WHERE lower(alias) LIKE ?))`,
+        [like, like],
+      )[0]?.n ?? 0;
+    const ref = this.ref
+      ? this.refRows<{ n: number }>('SELECT COUNT(*) AS n FROM foods WHERE search_key LIKE ?', [like])[0].n
+      : 0;
+    return local + ref;
+  }
+
+  private refBrowse(limit: number): FoodSummary[] {
+    if (!this.ref || limit <= 0) return [];
+    return this.refRows<{ fdc_id: number; description: string }>(
+      `SELECT fdc_id, description FROM foods ORDER BY description LIMIT ?`,
+      [limit],
+    ).map((r) => this.refFood(r));
+  }
+
   private refSearch(key: string, limit: number): FoodSummary[] {
     if (!this.ref || !key || limit <= 0) return [];
     return this.refRows<{ fdc_id: number; description: string }>(
       `SELECT fdc_id, description FROM foods
        WHERE search_key LIKE ? ORDER BY length(description) LIMIT ?`,
       [`%${key}%`, limit],
-    ).map((r) => ({
+    ).map((r) => this.refFood(r));
+  }
+
+  private refFood(r: { fdc_id: number; description: string }): FoodSummary {
+    return {
       id: `${REF_PREFIX}${r.fdc_id}`,
       name: r.description,
       brand: null,
@@ -283,7 +324,7 @@ export class SqliteRepository implements DataPort {
       quality: 'verified',
       sourceId: 's_usda',
       matchedAlias: null,
-    }));
+    };
   }
 
   getFood(id: string): FoodDetail | null {
@@ -504,6 +545,13 @@ export class SqliteRepository implements DataPort {
     this.commit();
   }
 
+  /** Distinct meal sections that have at least one live logged item. */
+  getUsedMealSections(): string[] {
+    return this.rows<{ meal_section: string }>(
+      'SELECT DISTINCT meal_section FROM log_items WHERE is_deleted = 0 ORDER BY meal_section',
+    ).map((r) => r.meal_section);
+  }
+
   // ── exercises / training ─────────────────────────────────
   searchExercises(query: string, limit = 25): ExerciseSummary[] {
     const key = normalizeKey(query);
@@ -529,6 +577,18 @@ export class SqliteRepository implements DataPort {
       primaryMuscles: primary.get(r.id as string) ?? [],
       matchedAlias: (r.matched_alias as string) ?? null,
     }));
+  }
+
+  /** Total exercises matching a query (mirrors searchExercises' criteria). */
+  countExercises(query: string): number {
+    const key = normalizeKey(query);
+    return (
+      this.rows<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM exercises e
+         WHERE e.is_deleted = 0 AND (? = '' OR e.search_key LIKE ? OR e.id IN (SELECT exercise_id FROM exercise_aliases WHERE lower(alias) LIKE ?))`,
+        [key, `%${key}%`, `%${key}%`],
+      )[0]?.n ?? 0
+    );
   }
 
   getExerciseMuscles(id: string): { primary: string[]; secondary: string[] } {

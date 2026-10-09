@@ -11,7 +11,7 @@ const PERSIST_KEY = 'hypertroph.db.v1';
 
 // Schema/data migrations applied to existing (persisted) databases. Version 1 is
 // the initial schema+seed; later versions are idempotent data/provenance fixes.
-const MIGRATIONS: { version: number; sql: string }[] = [
+export const MIGRATIONS: { version: number; sql: string }[] = [
   {
     // Compliance/provenance fix: hand-authored demo foods & exercises were
     // mislabeled as third-party sources. Reassign them to the app-owned source
@@ -33,6 +33,33 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     version: 3,
     sql: exercisesSql,
   },
+  {
+    // Allow user-defined meals. log_items.meal_section previously had a CHECK
+    // limited to five fixed sections; rebuild the table without it. Existing
+    // data (including child log_item_nutrients rows) is preserved verbatim.
+    version: 4,
+    sql: `
+      CREATE TABLE log_items_new (
+        id            TEXT PRIMARY KEY,
+        local_date    TEXT NOT NULL REFERENCES log_days(local_date),
+        meal_section  TEXT NOT NULL,
+        food_id       TEXT REFERENCES foods(id),
+        label         TEXT NOT NULL,
+        quantity_g    REAL,
+        portion_label TEXT,
+        source_id     TEXT REFERENCES sources(id),
+        created_at    INTEGER NOT NULL,
+        updated_at    INTEGER NOT NULL,
+        is_deleted    INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1))
+      );
+      INSERT INTO log_items_new (id, local_date, meal_section, food_id, label, quantity_g, portion_label, source_id, created_at, updated_at, is_deleted)
+        SELECT id, local_date, meal_section, food_id, label, quantity_g, portion_label, source_id, created_at, updated_at, is_deleted
+        FROM log_items;
+      DROP TABLE log_items;
+      ALTER TABLE log_items_new RENAME TO log_items;
+      CREATE INDEX IF NOT EXISTS idx_logitems_day ON log_items(local_date, meal_section);
+    `,
+  },
 ];
 
 function applyMigrations(db: DB): boolean {
@@ -47,22 +74,36 @@ function applyMigrations(db: DB): boolean {
   } catch {
     return false;
   }
+  if ((current ?? 0) >= Math.max(...MIGRATIONS.map((m) => m.version))) return false;
+  // Some migrations rebuild tables (dropping parents with live FKs). Constraint
+  // enforcement is re-checked afterwards via foreign_key_check.
+  const fkOn = db.exec('PRAGMA foreign_keys')[0]?.values[0]?.[0] === 1;
+  if (fkOn) db.run('PRAGMA foreign_keys = OFF');
   let changed = false;
-  for (const m of MIGRATIONS) {
-    if (m.version <= current) continue;
-    db.run('BEGIN');
-    try {
-      db.run(m.sql);
-      db.run('INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)', [
-        m.version,
-        Date.now(),
-        `compliance-v${m.version}`,
-      ]);
-      db.run('COMMIT');
-      changed = true;
-    } catch (e) {
-      db.run('ROLLBACK');
-      throw e;
+  try {
+    for (const m of MIGRATIONS) {
+      if (m.version <= current) continue;
+      db.run('BEGIN');
+      try {
+        db.run(m.sql);
+        db.run('INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)', [
+          m.version,
+          Date.now(),
+          `compliance-v${m.version}`,
+        ]);
+        db.run('COMMIT');
+        changed = true;
+        current = m.version;
+      } catch (e) {
+        db.run('ROLLBACK');
+        throw e;
+      }
+    }
+  } finally {
+    if (fkOn) {
+      db.run('PRAGMA foreign_keys = ON');
+      const violations = db.exec('PRAGMA foreign_key_check');
+      if (violations.length) throw new Error('Migration left dangling foreign keys');
     }
   }
   return changed;

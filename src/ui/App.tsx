@@ -19,8 +19,13 @@ import { CommandPalette } from './CommandPalette';
 type Section = 'nutrition' | 'training' | 'settings';
 type PaletteMode = 'food' | 'exercise';
 
-const MEALS = ['breakfast', 'lunch', 'dinner', 'snack'] as const;
+const DEFAULT_MEALS = ['breakfast', 'lunch', 'dinner'] as const;
+const MEAL_SUGGESTIONS = ['Snack', 'Shake', 'Pre-workout', 'Post-workout', 'Late-night'];
 const SUMMARY_NUTRIENTS = ['energy_kcal', 'protein_g', 'carb_g', 'fat_g'];
+
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 function toISODate(d: Date): string {
   const y = d.getFullYear();
@@ -52,6 +57,28 @@ function rowsToTotals(items: DayItemRow[]) {
   return sumNutrients(logItems);
 }
 
+// Meal list = defaults + saved customs (preferences) + any sections with live
+// log items, deduped case-insensitively and order-preserving.
+function buildMeals(r: SqliteRepository): string[] {
+  let saved: string[] = [];
+  try {
+    const v = JSON.parse(r.getPreference('meals', '') || 'null');
+    if (Array.isArray(v)) saved = v.map((s) => String(s)).filter(Boolean);
+  } catch {
+    saved = [];
+  }
+  const used = r.getUsedMealSections();
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of [...DEFAULT_MEALS, ...saved, ...used]) {
+    const k = String(m).toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(m);
+  }
+  return out;
+}
+
 export function App() {
   const [repo, setRepo] = useState<SqliteRepository | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,11 +93,14 @@ export function App() {
 
   const [dayItems, setDayItems] = useState<DayItemRow[]>([]);
   const [recentFoods, setRecentFoods] = useState<FoodSummary[]>([]);
+  const [meals, setMeals] = useState<string[]>([...DEFAULT_MEALS]);
+  const [pendingMeal, setPendingMeal] = useState<string | undefined>(undefined);
   const [activeWorkout, setActiveWorkout] = useState<WorkoutRow | null>(null);
   const [weeklyVolume, setWeeklyVolume] = useState<Map<string, number>>(new Map());
 
   const [palette, setPalette] = useState<PaletteMode | null>(null);
   const [logTarget, setLogTarget] = useState<FoodDetail | null>(null);
+  const [logMealDefault, setLogMealDefault] = useState<string>(DEFAULT_MEALS[0]);
   const [customOpen, setCustomOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -88,6 +118,7 @@ export function App() {
         setUnits(r.getPreference('units.mass', 'kg') === 'lb' ? 'lb' : 'kg');
         setSecondaryFactor(Number(r.getPreference('secondaryVolumeFactor', '0.5')));
         setMuscleNames(r.getMuscleNames());
+        setMeals(buildMeals(r));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -137,19 +168,61 @@ export function App() {
     return m;
   }, [nutrientDefs]);
 
-  const searchFoods = useCallback((q: string) => repo?.searchFoods(q, 20) ?? [], [repo]);
-  const searchExercises = useCallback((q: string) => repo?.searchExercises(q, 20) ?? [], [repo]);
+  const searchFoods = useCallback((q: string) => repo?.searchFoods(q, 50) ?? [], [repo]);
+  const countFoods = useCallback((q: string) => repo?.countFoods(q) ?? 0, [repo]);
+  const searchExercises = useCallback((q: string) => repo?.searchExercises(q, 50) ?? [], [repo]);
+  const countExercises = useCallback((q: string) => repo?.countExercises(q) ?? 0, [repo]);
 
   function go(next: Section) {
     setSection(next);
     setPalette(null);
   }
 
-  function openLog(food: FoodSummary) {
+  function openFoodPalette(meal?: string) {
+    setPendingMeal(meal);
+    setPalette('food');
+  }
+
+  function openLog(food: FoodSummary, meal?: string) {
     if (!repo) return;
     const detail = repo.getFood(food.id);
-    if (detail) setLogTarget(detail);
+    if (detail) {
+      setLogTarget(detail);
+      setLogMealDefault(meal ?? meals[0] ?? DEFAULT_MEALS[0]);
+    }
+    setPendingMeal(undefined);
     setPalette(null);
+  }
+
+  function addMeal(name: string) {
+    if (!repo) return;
+    const clean = name.trim().toLowerCase();
+    if (!clean) return;
+    if (meals.some((m) => m === clean)) {
+      setToast(`Already have ${cap(clean)}`);
+      return;
+    }
+    if (meals.length >= 12) {
+      setToast('Maximum 12 meals');
+      return;
+    }
+    const next = [...meals, clean];
+    setMeals(next);
+    repo.setPreference('meals', next);
+    setToast(`Added meal: ${cap(clean)}`);
+  }
+
+  function removeMeal(m: string) {
+    if (!repo || meals.length <= 1) return;
+    const next = meals.filter((x) => x !== m);
+    setMeals(next);
+    repo.setPreference('meals', next);
+    const hadItems = dayItems.some((i) => i.mealSection === m);
+    setToast(
+      hadItems
+        ? `Removed ${cap(m)} — items logged there still count toward today's totals`
+        : `Removed ${cap(m)}`,
+    );
   }
 
   function openExerciseInWorkout(ex: ExerciseSummary) {
@@ -262,17 +335,9 @@ export function App() {
         <div className="brand">
           hypertroph<span>+</span>
         </div>
-        <div className="nav">
-          <button className={section === 'nutrition' ? 'active' : ''} onClick={() => go('nutrition')}>
-            Nutrition
-          </button>
-          <button className={section === 'training' ? 'active' : ''} onClick={() => go('training')}>
-            Training
-          </button>
-        </div>
         <div className="spacer" />
         {section === 'nutrition' && (
-          <button className="primary" onClick={() => setPalette('food')}>
+          <button className="primary" onClick={() => openFoodPalette()}>
             Log food <span className="kbd">Ctrl K</span>
           </button>
         )}
@@ -286,6 +351,27 @@ export function App() {
         </button>
       </div>
 
+      <div className="segment-bar">
+        <div className="segments" role="tablist" aria-label="Sections">
+          <button
+            role="tab"
+            aria-selected={section === 'nutrition'}
+            className={`segment ${section === 'nutrition' ? 'active' : ''}`}
+            onClick={() => go('nutrition')}
+          >
+            Nutrition
+          </button>
+          <button
+            role="tab"
+            aria-selected={section === 'training'}
+            className={`segment ${section === 'training' ? 'active' : ''}`}
+            onClick={() => go('training')}
+          >
+            Training
+          </button>
+        </div>
+      </div>
+
       <div className="content">
         {section === 'nutrition' && (
           <NutritionSection
@@ -296,12 +382,15 @@ export function App() {
             targets={targets}
             defById={defById}
             recentFoods={recentFoods}
-            onAddFood={() => setPalette('food')}
+            meals={meals}
+            onAddFood={openFoodPalette}
             onPickRecent={openLog}
             onDelete={(id) => {
               repo.deleteLogItem(id);
               refresh();
             }}
+            onAddMeal={addMeal}
+            onRemoveMeal={removeMeal}
             onCreateCustom={() => setCustomOpen(true)}
           />
         )}
@@ -340,7 +429,9 @@ export function App() {
         <CommandPalette
           mode={palette}
           searchFoods={searchFoods}
+          countFoods={countFoods}
           searchExercises={searchExercises}
+          countExercises={countExercises}
           onPickFood={openLog}
           onPickExercise={openExerciseInWorkout}
           onClose={() => setPalette(null)}
@@ -352,6 +443,8 @@ export function App() {
           food={logTarget}
           defById={defById}
           units={units}
+          meals={meals}
+          initialMeal={logMealDefault}
           onCancel={() => setLogTarget(null)}
           onLog={logFood}
         />
@@ -373,14 +466,25 @@ function NutritionSection(props: {
   targets: Map<string, number>;
   defById: Map<string, NutrientDef>;
   recentFoods: FoodSummary[];
-  onAddFood: () => void;
+  meals: string[];
+  onAddFood: (meal?: string) => void;
   onPickRecent: (f: FoodSummary) => void;
   onDelete: (id: string) => void;
+  onAddMeal: (name: string) => void;
+  onRemoveMeal: (meal: string) => void;
   onCreateCustom: () => void;
 }) {
   const kcal = props.totals.get('energy_kcal');
   const kcalTarget = props.targets.get('energy_kcal');
   const pct = kcal && kcalTarget ? Math.min(100, (kcal.sumMilli / kcalTarget) * 100) : 0;
+  const [mealDraft, setMealDraft] = useState('');
+
+  function addMeal() {
+    if (mealDraft.trim()) {
+      props.onAddMeal(mealDraft);
+      setMealDraft('');
+    }
+  }
 
   return (
     <>
@@ -393,7 +497,7 @@ function NutritionSection(props: {
           <button className="ghost" onClick={() => props.setDate(addDays(props.date, 1))}>
             next ›
           </button>
-          <button className="primary" onClick={props.onAddFood}>
+          <button className="primary" onClick={() => props.onAddFood()}>
             + Log food
           </button>
         </div>
@@ -401,17 +505,33 @@ function NutritionSection(props: {
 
       <div className="grid" style={{ marginTop: 12 }}>
         <div className="card" style={{ gridColumn: 'span 2' }}>
-          {MEALS.map((meal) => {
-            const items = props.items.filter((i) => i.mealSection === meal);
+          <h3>Today's meals</h3>
+          {props.meals.map((meal, i) => {
+            const items = props.items.filter((it) => it.mealSection === meal);
             const mealKcal = items.reduce((acc, it) => {
               const e = it.nutrients.find((n) => n.nutrientId === 'energy_kcal');
               return acc + (e?.amountMilli ?? 0);
             }, 0);
             return (
-              <div className="meal" key={meal}>
-                <div className="row">
-                  <strong style={{ textTransform: 'capitalize' }}>{meal}</strong>
-                  <span className="muted small">{formatNutrient(mealKcal, 'kcal')} kcal</span>
+              <div className={`meal meal-acc${i % 3}`} key={meal}>
+                <div className="meal-head row">
+                  <strong className="meal-name">{cap(meal)}</strong>
+                  <span className="muted small">
+                    {items.length} item{items.length === 1 ? '' : 's'} · {formatNutrient(mealKcal, 'kcal')} kcal
+                  </span>
+                  <div className="nav">
+                    <button className="ghost small" title={`Add to ${cap(meal)}`} onClick={() => props.onAddFood(meal)}>
+                      + Add
+                    </button>
+                    <button
+                      className="ghost small danger"
+                      title="Remove meal"
+                      disabled={props.meals.length <= 1}
+                      onClick={() => props.onRemoveMeal(meal)}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
                 {items.map((it) => {
                   const e = it.nutrients.find((n) => n.nutrientId === 'energy_kcal');
@@ -434,6 +554,31 @@ function NutritionSection(props: {
               </div>
             );
           })}
+
+          <div className="add-meal">
+            <input
+              value={mealDraft}
+              onChange={(e) => setMealDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') addMeal();
+              }}
+              placeholder="Add a meal (e.g. Snack)"
+            />
+            <button className="primary" disabled={!mealDraft.trim()} onClick={addMeal}>
+              Add meal
+            </button>
+          </div>
+          <div className="chips">
+            {MEAL_SUGGESTIONS.filter((s) => !props.meals.includes(s.toLowerCase())).map((s) => (
+              <button key={s} className="chip" onClick={() => setMealDraft(s)}>
+                {s}
+              </button>
+            ))}
+          </div>
+          <p className="muted small" style={{ marginTop: 8 }}>
+            Meals are just labels — add anything: snacks, shakes, leftovers. Removing a meal hides its section, but items
+            logged under it still count toward today's totals.
+          </p>
         </div>
 
         <div className="card">
@@ -715,11 +860,16 @@ function LogDialog(props: {
   food: FoodDetail;
   defById: Map<string, NutrientDef>;
   units: 'kg' | 'lb';
+  meals: string[];
+  initialMeal?: string;
   onCancel: () => void;
   onLog: (food: FoodDetail, quantityG: number, portionLabel: string, meal: string) => void;
 }) {
+  const mealOptions = props.meals.length ? props.meals : [...DEFAULT_MEALS];
   const defaultPortion = props.food.portions.find((p) => p.isDefault) ?? props.food.portions[0];
-  const [meal, setMeal] = useState<string>('breakfast');
+  const [meal, setMeal] = useState<string>(
+    props.initialMeal && mealOptions.includes(props.initialMeal) ? props.initialMeal : mealOptions[0],
+  );
   const [unitKey, setUnitKey] = useState<string>(defaultPortion ? defaultPortion.id : 'g');
   const [quantity, setQuantity] = useState(defaultPortion ? '1' : '100');
 
@@ -756,9 +906,9 @@ function LogDialog(props: {
           <div className="row">
             <span>Meal</span>
             <select value={meal} onChange={(e) => setMeal(e.target.value)}>
-              {MEALS.map((m) => (
+              {mealOptions.map((m) => (
                 <option key={m} value={m}>
-                  {m}
+                  {cap(m)}
                 </option>
               ))}
             </select>

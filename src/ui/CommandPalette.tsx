@@ -6,20 +6,24 @@ type Mode = 'food' | 'exercise';
 interface Props {
   mode: Mode;
   searchFoods: (q: string) => FoodSummary[];
+  countFoods: (q: string) => number;
   searchExercises: (q: string) => ExerciseSummary[];
+  countExercises: (q: string) => number;
   onPickFood: (food: FoodSummary) => void;
   onPickExercise: (ex: ExerciseSummary) => void;
   onClose: () => void;
 }
 
-export function CommandPalette({ mode, searchFoods, searchExercises, onPickFood, onPickExercise, onClose }: Props) {
+export function CommandPalette({ mode, searchFoods, countFoods, searchExercises, countExercises, onPickFood, onPickExercise, onClose }: Props) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const foods = useMemo(() => (mode === 'food' ? searchFoods(query) : []), [mode, query, searchFoods]);
   const exercises = useMemo(() => (mode === 'exercise' ? searchExercises(query) : []), [mode, query, searchExercises]);
-  const count = mode === 'food' ? foods.length : exercises.length;
+  const matched = useMemo(() => (mode === 'food' ? countFoods(query) : countExercises(query)), [mode, query, countFoods, countExercises]);
+  const available = useMemo(() => (mode === 'food' ? countFoods('') : countExercises('')), [mode, countFoods, countExercises]);
+  const shown = mode === 'food' ? foods.length : exercises.length;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -38,7 +42,7 @@ export function CommandPalette({ mode, searchFoods, searchExercises, onPickFood,
     if (e.key === 'Escape') return onClose();
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActive((a) => Math.min(a + 1, count - 1));
+      setActive((a) => Math.min(a + 1, shown - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActive((a) => Math.max(a - 1, 0));
@@ -48,13 +52,21 @@ export function CommandPalette({ mode, searchFoods, searchExercises, onPickFood,
     }
   }
 
+  const catalogLabel = mode === 'food' ? 'foods' : 'exercises';
+  const catalogSize = available.toLocaleString();
+  const footer = query
+    ? shown < matched
+      ? `showing ${shown} of ${matched.toLocaleString()} ${catalogLabel}`
+      : `${matched.toLocaleString()} ${matched === 1 ? 'match' : 'matches'}`
+    : `showing ${shown} of ${catalogSize} ${catalogLabel} — type to narrow`;
+
   return (
     <div className="palette-overlay" onMouseDown={onClose}>
       <div className="palette" onMouseDown={(e) => e.stopPropagation()}>
         <input
           ref={inputRef}
           value={query}
-          placeholder={mode === 'food' ? 'Search food…' : 'Search exercise…'}
+          placeholder={mode === 'food' ? `Search ${catalogSize} foods…` : `Search ${catalogSize} exercises…`}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
         />
@@ -84,10 +96,10 @@ export function CommandPalette({ mode, searchFoods, searchExercises, onPickFood,
                 </span>
               </div>
             ))}
-          {count === 0 && <div className="result muted">No matches. {mode === 'food' ? 'Try “Create custom food”.' : 'Custom exercise coming next.'}</div>}
+          {shown === 0 && <div className="result muted">No matches. {mode === 'food' ? 'Try “Create custom food”.' : 'Custom exercise coming next.'}</div>}
         </div>
         <div className="tabs">
-          <span className="small muted">{mode === 'food' ? 'Logging food' : 'Logging exercise'}</span>
+          <span className="small muted">{footer}</span>
           <span className="spacer" />
           <span className="kbd">↑↓</span>
           <span className="small muted">move ·</span>
