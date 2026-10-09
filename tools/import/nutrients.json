@@ -3,6 +3,8 @@
   "nutrients": [
     { "id": 1008, "number": "208", "code": "energy_kcal", "name": "Energy", "unit": "kcal", "role": "energy" },
     { "id": 1062, "number": "268", "code": "energy_kj", "name": "Energy", "unit": "kJ", "role": "energy" },
+    { "id": 2047, "number": "957", "code": null, "name": "Energy (Atwater General Factors)", "unit": "kcal", "role": "energy_alt" },
+    { "id": 2048, "number": "958", "code": null, "name": "Energy (Atwater Specific Factors)", "unit": "kcal", "role": "energy_alt" },
     { "id": 1003, "number": "203", "code": "protein", "name": "Protein", "unit": "g", "role": "macro" },
     { "id": 1004, "number": "204", "code": "fat", "name": "Total lipid (fat)", "unit": "g", "role": "macro" },
     { "id": 1005, "number": "205", "code": "carb", "name": "Carbohydrate, by difference", "unit": "g", "role": "macro" },

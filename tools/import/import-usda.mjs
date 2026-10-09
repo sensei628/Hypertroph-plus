@@ -59,6 +59,10 @@ function normalizeKey(s) {
     .trim();
 }
 
+// Pseudo "nutrients" that are not nutrition data (e.g. Specific Gravity is a
+// conversion factor; Footnote rows carry metadata). Excluded from import.
+const SKIP_NUTRIENT = /specific gravity|^footnote$|moisture changes/i;
+
 function pickArray(json) {
   if (arrayOverride) return json[arrayOverride];
   const key = Object.keys(json).find((k) => Array.isArray(json[k]));
@@ -132,6 +136,8 @@ async function main() {
   const insCat = db.prepare(`INSERT OR IGNORE INTO food_categories (id,description) VALUES (?,?)`);
 
   const seenNutrients = new Set();
+  const catIds = new Map();
+  let catSeq = 900000;
   let nNutrients = 0;
   let nPortions = 0;
   let nFoods = 0;
@@ -146,7 +152,12 @@ async function main() {
       continue;
     }
     const cat = categoryOf(food);
-    if (cat.id != null && cat.desc) insCat.run([cat.id, cat.desc]);
+    let catId = cat.id;
+    if (cat.desc && catId == null) {
+      if (!catIds.has(cat.desc)) catIds.set(cat.desc, ++catSeq);
+      catId = catIds.get(cat.desc);
+    }
+    if (catId != null && cat.desc) insCat.run([catId, cat.desc]);
 
     insFood.run([
       food.fdcId,
@@ -154,7 +165,7 @@ async function main() {
       food.dataType || dataType,
       food.foodClass ?? null,
       cat.desc,
-      cat.id,
+      catId,
       food.ndbNumber != null ? String(food.ndbNumber) : null,
       food.publicationDate ?? null,
       sourceId,
@@ -167,6 +178,7 @@ async function main() {
     for (const fn of food.foodNutrients || []) {
       const nut = fn.nutrient;
       if (!nut || nut.id == null) continue;
+      if (SKIP_NUTRIENT.test(nut.name || '') || nut.unitName === 'sp gr') continue;
       if (!seenNutrients.has(nut.id)) {
         const m = nutrientMap.get(nut.id);
         insNut.run([
