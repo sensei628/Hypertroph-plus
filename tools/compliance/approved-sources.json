@@ -67,24 +67,24 @@
       "note": "Runtime-only user data. Never bundled or committed."
     }
   ],
-  "restricted": [
+  "excluded": [
     {
       "id": "ifct2017",
       "name": "ICMR-NIN Indian Food Composition Tables 2017",
       "reason": "No part may be stored/reproduced in any electronic format for creating a product without prior written permission of NIN.",
-      "handling": "user-supplied only; never bundle or commit"
+      "handling": "excluded entirely — no loader, no template, never bundled or committed"
     },
     {
       "id": "icmr_nin_rda",
       "name": "ICMR-NIN Nutrient Requirements & RDA for Indians",
       "reason": "Paid copyrighted publication.",
-      "handling": "user-supplied only; never bundle or commit"
+      "handling": "excluded entirely — no loader, no template, never bundled or committed"
     },
     {
       "id": "fsanz",
       "name": "FSANZ AUSNUT / AFCD / NUTTAB",
       "reason": "Gated Data User Licence Agreement / CC BY-SA-ish / permission-only; no sublicensing.",
-      "handling": "user-supplied only; never bundle or commit"
+      "handling": "excluded entirely — no loader, no template, never bundled or committed"
     }
   ],
   "forbiddenPatterns": ["ifct", "ausnut", "afcd", "nuttab", "fsanz", "nutrition db"],

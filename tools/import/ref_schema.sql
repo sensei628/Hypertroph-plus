@@ -1,6 +1,9 @@
 -- Reference database (read-only at runtime) built by tools/import/import-usda.mjs
--- and future IFCT/AUSNUT/RDA loaders. This DB is a build artifact loaded into
--- sql.js on startup; it is never written to at runtime.
+-- from the official USDA FoodData Central (CC0 1.0) archives. This DB is a build
+-- artifact loaded into sql.js on startup; it is never written to at runtime.
+--
+-- Only public-domain / CC0 data is imported. Copyrighted food-composition
+-- datasets are deliberately NOT supported (see DATA_LICENSES.md).
 --
 -- Conventions:
 --  * nutrient ids are the official USDA FoodData Central nutrient ids.
@@ -16,7 +19,7 @@ CREATE TABLE IF NOT EXISTS ref_meta (
 );
 
 CREATE TABLE IF NOT EXISTS sources (
-  id           TEXT PRIMARY KEY,      -- e.g. 'usda_fdc', 'ifct2017', 'ausnut'
+  id           TEXT PRIMARY KEY,      -- e.g. 'usda_fdc'
   name         TEXT NOT NULL,
   short_name   TEXT,
   license      TEXT,
@@ -92,22 +95,3 @@ CREATE TABLE IF NOT EXISTS food_portions (
   gram_weight  REAL                   -- grams; NULL/0 means not convertible
 );
 CREATE INDEX IF NOT EXISTS idx_fp_food ON food_portions(food_id);
-
--- Indian RDA / EAR reference table (populated by tools/import/import-rda.mjs).
-CREATE TABLE IF NOT EXISTS rda_refs (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  nutrient_code TEXT NOT NULL,
-  nutrient_name TEXT NOT NULL,
-  unit          TEXT NOT NULL,
-  amount        REAL,
-  ref_type      TEXT NOT NULL,        -- RDA | EAR | AI | UL
-  age_min       REAL,
-  age_max       REAL,
-  sex           TEXT,                 -- male | female | both
-  life_stage    TEXT,                 -- null | pregnancy | lactation
-  source_doc    TEXT NOT NULL,
-  pub_year      TEXT,
-  page_ref      TEXT,
-  notes         TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_rda_code ON rda_refs(nutrient_code);

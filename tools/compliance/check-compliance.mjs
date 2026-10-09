@@ -5,9 +5,9 @@
 //   * db/seed.sql references an unknown source id
 //   * a bundled data asset references an unknown source, or a source that is not
 //     redistribution:"allowed"
-//   * a bundled asset (public/ or dist/) or a git-tracked file name contains a
-//     restricted-dataset pattern (ifct, ausnut, afcd, nuttab, fsanz, ...)
-//   * a restricted cache path is not git-ignored
+//   * a bundled asset (public/ or dist/) or a git-tracked file name contains an
+//     excluded-dataset pattern (ifct, ausnut, afcd, nuttab, fsanz, ...)
+//   * an excluded-dataset cache path is not git-ignored
 //   * the attribution file / licence register is missing, or a bundled source that
 //     requires attribution is not credited.
 //
@@ -86,13 +86,6 @@ if (seed == null) {
 // ── 2. bundled data assets ──────────────────────────────────────────────────
 const forbidden = (allowlist.forbiddenPatterns ?? []).map((p) => p.toLowerCase());
 
-// Committed loaders/templates/docs may legitimately name a restricted dataset
-// (e.g. templates/ifct.template.csv) — only DATA files are forbidden.
-function isTokenAllowedPath(rel) {
-  const r = rel.replace(/\\/g, '/').toLowerCase();
-  return r.includes('/templates/') || r.endsWith('.template.csv');
-}
-
 function checkAsset(entry, { requireAllowed }) {
   const src = resolveSource(entry.sourceId);
   if (!src) {
@@ -130,8 +123,8 @@ function distHasRestricted() {
       const full = join(dir, name);
       const rel = relative(root, full).toLowerCase();
       for (const pat of forbidden) {
-        if (rel.includes(pat) && !isTokenAllowedPath(rel)) {
-          fail(`restricted pattern '${pat}' found in build output: ${rel}`);
+        if (rel.includes(pat)) {
+          fail(`excluded dataset pattern '${pat}' found in build output: ${rel}`);
           bad = true;
         }
       }
@@ -156,8 +149,8 @@ function gitTrackedRestricted() {
   for (const f of files) {
     const lower = f.toLowerCase();
     for (const pat of forbidden) {
-      if (lower.includes(pat) && !isTokenAllowedPath(f)) {
-        fail(`restricted file is tracked by git: ${f} (pattern '${pat}')`);
+      if (lower.includes(pat)) {
+        fail(`excluded dataset file is tracked by git: ${f} (pattern '${pat}')`);
         bad = true;
       }
     }

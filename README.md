@@ -40,9 +40,8 @@ full provenance register is [`DATA_LICENSES.md`](./DATA_LICENSES.md).
 - **Bundled:** USDA FoodData Central (CC0 1.0, public domain) as
   `public/hypertroph-ref.sqlite.gz`, plus app-authored data. Attribution is in
   [`public/ATTRIBUTION.txt`](./public/ATTRIBUTION.txt).
-- **Not bundled (user-supplied only):** ICMR-NIN IFCT 2017 / RDA, and FSANZ
-  AUSNUT / AFCD / NUTTAB — copyrighted; loaders only, data imported locally and kept
-  out of git.
+- **Excluded entirely (not supported, not importable):** ICMR-NIN IFCT 2017 / RDA, and
+  FSANZ AUSNUT / AFCD / NUTTAB — copyrighted; no loaders, no templates, no code path.
 
 `npm run data:compliance` (also run automatically by `npm run build`) fails the build if a
 source is unknown, a bundled asset is not approved, or any restricted data is tracked by

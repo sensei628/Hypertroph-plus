@@ -59,13 +59,15 @@ node tools/import/import-usda.mjs `
   --datatype "Foundation" --release 2026-04-30 --version usda_foundation_2026-04-30
 ```
 
-## Other datasets (loaders)
+## Scope
 
-Tracked in the project roadmap. Each loader consumes the **official file you
-provide** and never fabricates values:
+hypertroph+ imports **public-domain / CC0 data only**. Today that means USDA
+FoodData Central (CC0 1.0). App-authored data (seed foods, exercises, taxonomies)
+lives in `db/seed.sql`.
 
-- **IFCT 2017** (Indian, ICMR-NIN) — structured food + nutrient import.
-- **AUSNUT / AFCD** (Australia) — subject to Food Standards Australia NZ data-use terms.
-- **Indian RDA/EAR** (ICMR-NIN) — reference table loader feeding `rda_refs`.
+Copyrighted food-composition databases (e.g. ICMR-NIN IFCT/RDA, FSANZ
+AUSNUT/AFCD/NUTTAB) are **not supported and not importable** — no loaders, no
+templates. This keeps the project free of redistribution restrictions. See
+`DATA_LICENSES.md`.
 
 See the root `README.md` "Data & licensing" section for status and attribution.

@@ -1,5 +1,0 @@
-# IFCT 2017 import template (per 100 g edible portion, raw as-tabulated)
-# One row per IFCT food record. DO NOT invent values; leave blank if not tabulated.
-# nutrient codes map to tools/import/nutrients.json "code" values.
-ifct_code,name,group,part,energy_kcal,protein_g,fat_g,carb_g,fiber_g,calcium_mg,iron_mg,zinc_mg,vit_c_mg,folate_ug,vit_a_ug,sodium_mg,potassium_mg
-<code>,<name>,<food group>,<part>,<value>,<value>,<value>,<value>,<value>,<value>,<value>,<value>,<value>,<value>,<value>,<value>,<value>

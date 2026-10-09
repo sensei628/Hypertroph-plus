@@ -30,11 +30,10 @@ works authored for this project (© hypertroph+). They are not derived from any
 third-party database.
 
 --------------------------------------------------------------------------------
-Not bundled (user-supplied only)
+Excluded (not supported, not included)
 --------------------------------------------------------------------------------
-The following datasets are copyrighted and are NOT included in this repository or
-in the shipped application. Loaders are provided so users may import their own
-legally obtained copies locally:
+The following datasets are copyrighted with redistribution restrictions. They are
+NOT included, NOT bundled, and NOT importable in this application:
   * ICMR-NIN Indian Food Composition Tables 2017 (IFCT)
   * ICMR-NIN Nutrient Requirements & RDA for Indians
   * FSANZ AUSNUT / AFCD / NUTTAB (Australia)

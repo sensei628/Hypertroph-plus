@@ -63,10 +63,12 @@ Rules
 
 ---
 
-## ⛔ Restricted — NOT bundled (user-supplied only)
+## ⛔ Excluded — not supported at all
 
-These are copyrighted and may **not** be stored/reproduced in any electronic product or
-committed to this repository. A loader may be provided; the data stays local.
+These datasets are copyrighted with redistribution restrictions, so hypertroph+ does
+**not** support them: no loader, no import template, no code path. The data is never
+bundled, committed, or imported. (A build-time guard still fails the build if any of
+these ever appears in a bundled asset, in `dist/`, or in git.)
 
 ### ICMR-NIN — Indian Food Composition Tables 2017 (IFCT)
 - **Copyright:** © 2017 National Institute of Nutrition, ICMR (Government of India).
@@ -75,18 +77,18 @@ committed to this repository. A loader may be provided; the data stays local.
   source. **However, no part of this publication can be stored or reproduced in any
   electronic format for creating a product without the prior written permission of the
   National Institute of Nutrition, Hyderabad.**"
-- **Handling:** user-supplied at build time; never bundled, never committed.
+- **Decision:** excluded — would require written permission from NIN.
 
 ### ICMR-NIN — Nutrient Requirements & Recommended Dietary Allowances for Indians (RDA/EAR)
 - **Copyright:** paid, copyrighted publication (ICMR-NIN).
-- **Handling:** user-supplied at build time; never bundled, never committed.
+- **Decision:** excluded.
 
 ### FSANZ — AUSNUT / AFCD / NUTTAB (Australia)
 - **AFCD:** gated *Data User Licence Agreement* (CC BY-SA 3.0 AU **based**, no
-  sublicensing, requires accepting terms + a limitation-of-data statement).
+  sublicensing, requires accepting terms).
 - **AUSNUT 2007:** permission-only, personal/non-commercial use.
 - **AUSNUT 2011-13:** CC BY 3.0 AU with third-party exceptions.
-- **Handling:** user-supplied at build time; never bundled, never committed.
+- **Decision:** excluded.
 
 ### Other proprietary references (ExRx, paid app DBs, RP/Israetel programs)
 - Proprietary / all rights reserved. No scraping, no redistribution, no copying of
@@ -94,12 +96,12 @@ committed to this repository. A loader may be provided; the data stays local.
 
 ---
 
-## How restricted data is kept out
-- Restricted source files live in **git-ignored** caches (`Nutrition DB/`,
-  `tools/import/.cache/`).
-- `tools/compliance/check-compliance.mjs` fails the build if a restricted name appears
-  in a bundled asset or in `dist/`, if a source id is unknown, or if any restricted file
-  is tracked by git.
+## How excluded data is kept out
+- There is **no importer or template** for any excluded dataset.
+- Excluded source files are **git-ignored** (`Nutrition DB/`, `tools/import/.cache/`).
+- `tools/compliance/check-compliance.mjs` fails the build if an excluded dataset name
+  appears in a bundled asset or in `dist/`, if a source id is unknown, or if any such
+  file is tracked by git.
 
 ## Attribution
-Bundled attribution text ships in `public/ATTRIBUTION.txt` and is surfaced in the app.
+Bundled attribution text ships in `public/ATTRIBUTION.txt`.

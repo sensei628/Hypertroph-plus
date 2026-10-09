@@ -1,2 +1,0 @@
-nutrient_code,ref_type,age_min,age_max,sex,life_stage,amount,unit,source_doc,pub_year,page_ref,notes
-<code>,RDA|<EAR|AI|UL>,<age_min>|<age_max>,<male|female|both>,<|pregnancy|lactation>,<value>,<unit>,<official document>,<year>,<page/table>,<notes>
