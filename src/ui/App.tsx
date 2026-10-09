@@ -88,6 +88,7 @@ export function App() {
   const [nutrientDefs, setNutrientDefs] = useState<NutrientDef[]>([]);
   const [targets, setTargets] = useState<Map<string, number>>(new Map());
   const [units, setUnits] = useState<'kg' | 'lb'>('kg');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [secondaryFactor, setSecondaryFactor] = useState(0.5);
   const [muscleNames, setMuscleNames] = useState<Map<string, string>>(new Map());
 
@@ -119,6 +120,9 @@ export function App() {
         setSecondaryFactor(Number(r.getPreference('secondaryVolumeFactor', '0.5')));
         setMuscleNames(r.getMuscleNames());
         setMeals(buildMeals(r));
+        const savedTheme = r.getPreference('theme', 'light') === 'dark' ? 'dark' : 'light';
+        setTheme(savedTheme);
+        document.documentElement.classList.toggle('dark', savedTheme === 'dark');
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -146,6 +150,17 @@ export function App() {
     const t = setTimeout(() => setToast(null), 3200);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Apply the active theme class to <html>; keeps the loading screen themed too.
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  }, [theme]);
+
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    repo?.setPreference('theme', next);
+  }
 
   // Context-aware Ctrl/Cmd-K: foods in Nutrition, exercises in Training.
   useEffect(() => {
@@ -188,8 +203,13 @@ export function App() {
     const detail = repo.getFood(food.id);
     if (detail) {
       setLogTarget(detail);
-      setLogMealDefault(meal ?? meals[0] ?? DEFAULT_MEALS[0]);
+      setLogMealDefault(meal ?? pendingMeal ?? meals[0] ?? DEFAULT_MEALS[0]);
     }
+    setPendingMeal(undefined);
+    setPalette(null);
+  }
+
+  function closePalette() {
     setPendingMeal(undefined);
     setPalette(null);
   }
@@ -346,6 +366,14 @@ export function App() {
             Add exercise <span className="kbd">Ctrl K</span>
           </button>
         )}
+        <button
+          className="icon-btn"
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
+          onClick={toggleTheme}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
         <button className={section === 'settings' ? 'active' : ''} onClick={() => go('settings')}>
           Settings
         </button>
@@ -434,7 +462,7 @@ export function App() {
           countExercises={countExercises}
           onPickFood={openLog}
           onPickExercise={openExerciseInWorkout}
-          onClose={() => setPalette(null)}
+          onClose={closePalette}
         />
       )}
 
@@ -515,7 +543,10 @@ function NutritionSection(props: {
             return (
               <div className={`meal meal-acc${i % 3}`} key={meal}>
                 <div className="meal-head row">
-                  <strong className="meal-name">{cap(meal)}</strong>
+                  <strong className="meal-name">
+                    <span className="meal-index">M{i + 1}</span>
+                    {cap(meal)}
+                  </strong>
                   <span className="muted small">
                     {items.length} item{items.length === 1 ? '' : 's'} · {formatNutrient(mealKcal, 'kcal')} kcal
                   </span>
@@ -906,9 +937,9 @@ function LogDialog(props: {
           <div className="row">
             <span>Meal</span>
             <select value={meal} onChange={(e) => setMeal(e.target.value)}>
-              {mealOptions.map((m) => (
+              {mealOptions.map((m, i) => (
                 <option key={m} value={m}>
-                  {cap(m)}
+                  M{i + 1} · {cap(m)}
                 </option>
               ))}
             </select>

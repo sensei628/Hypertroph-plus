@@ -14,6 +14,25 @@
   --radius: 10px;
 }
 
+.dark {
+  --bg: #16130d;
+  --panel: #211c14;
+  --panel-2: #2d2719;
+  --border: rgba(255, 253, 236, 0.16);
+  --text: #fffdec;
+  --muted: #a89f87;
+  --accent: #72b311;
+  --accent-text: #a4dc43;
+  --accent-2: #c895c2;
+  --warn: #fce300;
+  --warn-text: #f6d94b;
+  --danger: #e05543;
+}
+
+.dark .pr {
+  color: #c895c2;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -55,6 +74,12 @@ button.primary {
 
 button.ghost {
   background: transparent;
+}
+
+.icon-btn {
+  font-size: 15px;
+  line-height: 1;
+  padding: 6px 10px;
 }
 
 input,
@@ -274,8 +299,19 @@ select {
 }
 
 .meal-name {
-  text-transform: capitalize;
-  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meal-index {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 5px;
 }
 
 button.danger {
