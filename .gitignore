@@ -8,3 +8,9 @@ coverage/
 *.log
 .env
 .vite/
+
+# Data pipeline: keep the gzipped reference asset; ignore raw artifacts + downloads
+public/hypertroph-ref.sqlite
+tools/import/.cache/
+*.sqlite
+*.sqlite-journal

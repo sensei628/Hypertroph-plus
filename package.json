@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "data:download:usda": "powershell -ExecutionPolicy Bypass -File tools/import/download-usda.ps1",
+    "data:build:usda": "node tools/import/build-usda.mjs",
+    "data:verify": "node tools/import/verify-ref.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
