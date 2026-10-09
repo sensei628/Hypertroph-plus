@@ -1,0 +1,23 @@
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m554[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5177[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[2m7:00:44 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:00:45 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:00:45 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:00:46 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:00:59 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:00:59 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:01:10 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:01:11 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:01:11 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:01:22 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/ui/App.tsx[22m
+[2m7:01:52 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m7:59:53 pm[22m [36m[1m[vite][22m[39m [32mvite.config.ts changed, restarting server...[39m
+[2m7:59:54 pm[22m [36m[1m[vite][22m[39m server restarted.
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5177[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.1.13:[1m5177[22m/[39m
+[2m8:06:51 pm[22m [36m[1m[vite][22m[39m [32mvite.config.ts changed, restarting server...[39m
+[2m8:06:51 pm[22m [36m[1m[vite][22m[39m server restarted.

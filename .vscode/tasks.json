@@ -1,0 +1,18 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "hypertroph+: dev server (public-shareable)",
+      "type": "shell",
+      "command": "npm.cmd run dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "hypertroph"
+      },
+      "detail": "Starts Vite on localhost:5173. Then set the port to Public in the Ports view to share it."
+    }
+  ]
+}

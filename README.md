@@ -1,0 +1,92 @@
+# hypertroph+
+
+Offline-first desktop app for **nutrition tracking + hypertrophy-focused resistance training**.
+
+This repository currently contains the **base model**: a runnable, tested foundation used to
+validate direction before committing to the full desktop (Tauri/Rust) build. It implements the
+real data model, the integrity guarantees, and the core UX flows.
+
+## Status
+
+| Area | State |
+|---|---|
+| SQLite schema v1 (foods, nutrients, snapshots, exercises, workouts, sets, PRs) | Done |
+| Fixed-point nutrient math + snapshot-on-log + unknown ≠ zero | Done |
+| Hypertrophy metrics (weekly working-set volume, e1RM, PR detection, volume load) | Done |
+| Repository / data-port abstraction (swappable to Tauri/rusqlite) | Done |
+| Nutrition loop: search → log → diary → daily totals | Done |
+| Training loop: start workout → add exercise → log sets → PR → finish | Done |
+| Dashboard, progress (weekly volume), settings (units/targets) | Done |
+| Command palette + keyboard flow | Done |
+| Tauri/Rust shell, installers, FTS5, data packs | **Not yet** (planned) |
+
+## Run it
+
+```powershell
+npm.cmd install
+npm.cmd run dev      # dev server
+npm.cmd run build    # typecheck + production build
+npm.cmd run test     # 23 unit + integration tests
+```
+
+> On this machine the PowerShell `npm` shim is blocked by execution policy; use `npm.cmd`
+> (or run the binaries under `node_modules\.bin\`).
+
+## What the base model proves
+
+1. **The schema works** against a real SQLite engine (`sql.js` WASM), including seeding,
+   indexing, and the logging transaction.
+2. **The integrity rules hold** (enforced by tests): nutrient values are frozen on log; editing
+   a source food never rewrites history; unknown nutrients are `NULL`/`—`, never counted as 0;
+   recipe and daily totals are integer-safe.
+3. **The UX direction is concrete**: command-palette logging, a rest timer, PR flags, and a
+   weekly-volume view.
+4. **The Tauri seam exists**: all UI talks to the `DataPort` interface. The web build uses
+   `sql.js` + localStorage; the desktop build will provide a `TauriRepository` over `rusqlite`
+   without changing the UI or domain layer.
+
+## Architecture (base model)
+
+```
+src/domain/*        pure TypeScript: fixed-point nutrition + hypertrophy metrics   (unit-tested)
+src/data/db.ts      SQL injection point: loads schema+seed, persistence            (swap for rusqlite)
+src/data/repository.ts  DataPort interface + SqliteRepository                       (integration-tested)
+src/ui/*            React: App, CommandPalette                                      (talks only to DataPort)
+db/schema.sql       schema v1 (34 tables/indexes)
+db/seed.sql         small curated foods + exercises with provenance
+```
+
+## Roadmap from here (from the plan docs in `..\hypertrophy-app-plan`)
+
+```mermaid
+flowchart LR
+  A[Base model: web + sql.js] --> B[Tauri 2 + rusqlite shell]
+  B --> C[USDA pack importer + FTS5 search]
+  C --> D[Nutrition module complete]
+  C --> E[Training module complete]
+  D --> F[Analytics + dashboard]
+  E --> F
+  F --> G[Backup/restore + migrations]
+  G --> H[Installer, signing, beta, v1.0]
+```
+
+**Where it should head (recommendation):**
+1. Wrap this exact UI/domain in **Tauri 2** so data lands in a real on-device SQLite file
+   (privacy + backup + no browser storage limits). This is the smallest, highest-value step.
+2. Replace the `search_key LIKE` search with **FTS5** (already in the plan) once the pack grows.
+3. Build the **USDA pack importer** (CC0) next — it unlocks real coverage with zero licensing risk.
+4. Then finish recipes, measurements, and backup/restore to hit the MVP exit criteria.
+
+## Explore these decisions while it's small
+
+- **Logging speed:** is Ctrl-K → type → Enter actually <20 s? Use it for a day.
+- **Unknown ≠ zero UX:** does the "partial data" flag communicate clearly, or confuse?
+- **Volume definition:** is 0.5× for secondary muscles the right default for you?
+- **Units:** does gram-canonical storage with kg/lb display feel right in the gym?
+- **Scope:** which of these are truly MVP — recipes, measurements, charts?
+
+## Not included yet
+
+Rust/Tauri shell, installers, FTS5, real data packs, recipes UI, body measurements,
+backup/restore, localization files, and barcode/branded lookups. See the plan docs for the
+full sequence, epics, and timeline.
