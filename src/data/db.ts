@@ -4,6 +4,7 @@ import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import schemaSql from '../../db/schema.sql?raw';
 import seedSql from '../../db/seed.sql?raw';
 import exercisesSql from '../../db/exercises.sql?raw';
+import exerciseCategoriesSql from '../../db/exercise_categories.sql?raw';
 
 export type DB = Database;
 
@@ -58,6 +59,168 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       DROP TABLE log_items;
       ALTER TABLE log_items_new RENAME TO log_items;
       CREATE INDEX IF NOT EXISTS idx_logitems_day ON log_items(local_date, meal_section);
+    `,
+  },
+  {
+    // Food taxonomy + body metrics.
+    //
+    // foods.category was a single free-text field and prep_state had a CHECK
+    // limited to raw/cooked/as_sold/prepared/unknown. This rebuilds foods with
+    // three independent normalization axes plus brand/product identity:
+    //   - food_type_id   (normalized food taxonomy, from food_types)
+    //   - entry_type     (generic / prepared / branded / custom)
+    //   - prep_state     (widened: adds boiled/steamed/roasted/fried/baked/...)
+    //   - manufacturer/product_variant/barcode/serving_description (branded)
+    // Backfill comes only from real data that was already present (category
+    // text of the app-authored seed, custom flag); everything else stays NULL.
+    version: 5,
+    sql: `
+      CREATE TABLE IF NOT EXISTS food_types (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT OR IGNORE INTO food_types (id, name, sort_order) VALUES
+        ('grains','Grains & cereals',1),('legumes','Pulses & legumes',2),
+        ('vegetables','Vegetables',3),('fruits','Fruits',4),
+        ('dairy','Dairy',5),('eggs','Eggs',6),
+        ('meat','Meat & poultry',7),('seafood','Seafood',8),
+        ('oils','Oils & fats',9),('nuts','Nuts & seeds',10),
+        ('snacks','Snacks & sweets',11),('beverages','Beverages',12),
+        ('supplements','Supplements',13),('mixed_dishes','Mixed dishes',14),
+        ('other','Other',99);
+
+      CREATE TABLE foods_new (
+        id                 TEXT PRIMARY KEY,
+        canonical_name     TEXT NOT NULL,
+        search_key         TEXT NOT NULL,
+        brand              TEXT,
+        category           TEXT,
+        food_type_id       TEXT REFERENCES food_types(id),
+        entry_type         TEXT CHECK (entry_type IN ('generic','prepared','branded','custom')),
+        manufacturer       TEXT,
+        product_variant    TEXT,
+        barcode            TEXT,
+        serving_description TEXT,
+        prep_state         TEXT NOT NULL DEFAULT 'unknown'
+                             CHECK (prep_state IN ('raw','cooked','boiled','steamed','roasted','fried','baked','dried','canned','frozen','as_sold','prepared','unknown')),
+        basis              TEXT NOT NULL DEFAULT 'per_100g'
+                             CHECK (basis IN ('per_100g','per_100ml')),
+        language           TEXT,
+        region             TEXT,
+        source_id          TEXT NOT NULL REFERENCES sources(id),
+        source_record_id   TEXT,
+        data_quality       TEXT NOT NULL DEFAULT 'unverified'
+                             CHECK (data_quality IN ('verified','derived','crowd','user','unverified')),
+        is_custom          INTEGER NOT NULL DEFAULT 0 CHECK (is_custom IN (0,1)),
+        is_recipe          INTEGER NOT NULL DEFAULT 0 CHECK (is_recipe IN (0,1)),
+        is_deleted         INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1)),
+        published_at       TEXT,
+        created_at         INTEGER NOT NULL,
+        updated_at         INTEGER NOT NULL
+      );
+      INSERT INTO foods_new (id, canonical_name, search_key, brand, category, prep_state, basis, language, region, source_id, source_record_id, data_quality, is_custom, is_recipe, is_deleted, created_at, updated_at)
+        SELECT id, canonical_name, search_key, brand, category, prep_state, basis, language, region, source_id, source_record_id, data_quality, is_custom, is_recipe, is_deleted, created_at, updated_at
+        FROM foods;
+      DROP TABLE foods;
+      ALTER TABLE foods_new RENAME TO foods;
+      CREATE INDEX IF NOT EXISTS idx_foods_name   ON foods(canonical_name);
+      CREATE INDEX IF NOT EXISTS idx_foods_key    ON foods(search_key);
+      CREATE INDEX IF NOT EXISTS idx_foods_custom ON foods(is_custom, is_deleted);
+      CREATE INDEX IF NOT EXISTS idx_foods_type   ON foods(food_type_id);
+
+      -- Backfill from real data only. App-authored seed category text maps to
+      -- the normalized taxonomy; nothing is inferred for unlabeled rows.
+      UPDATE foods SET food_type_id = CASE category
+        WHEN 'grains' THEN 'grains' WHEN 'dairy' THEN 'dairy' WHEN 'fruit' THEN 'fruits'
+        WHEN 'meat' THEN 'meat' WHEN 'fats' THEN 'oils' WHEN 'supplement' THEN 'supplements'
+        ELSE food_type_id END
+        WHERE category IN ('grains','dairy','fruit','meat','fats','supplement');
+      UPDATE foods SET entry_type = 'custom' WHERE is_custom = 1 AND entry_type IS NULL;
+      UPDATE foods SET entry_type = 'generic' WHERE source_id = 's_app' AND entry_type IS NULL;
+
+      CREATE TABLE IF NOT EXISTS body_metrics (
+        id          TEXT PRIMARY KEY,
+        metric_type TEXT NOT NULL CHECK (metric_type IN ('weight_kg','height_cm','body_fat_pct','waist_cm','other')),
+        value       REAL NOT NULL,
+        local_date  TEXT NOT NULL,
+        note        TEXT,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_body_metrics_date ON body_metrics(metric_type, local_date);
+
+      CREATE TABLE IF NOT EXISTS favorites (
+        entity_type TEXT NOT NULL CHECK (entity_type IN ('food','exercise')),
+        entity_id   TEXT NOT NULL,
+        created_at  INTEGER NOT NULL,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS recent_uses (
+        entity_type  TEXT NOT NULL CHECK (entity_type IN ('food','exercise')),
+        entity_id    TEXT NOT NULL,
+        last_used_at INTEGER NOT NULL,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+    `,
+  },
+  {
+    // Exercise taxonomy. The Free Exercise DB carries a `category` field
+    // (strength/powerlifting/strongman/olympic weightlifting/cardio/stretching/
+    // plyometrics) that the v3 importer previously discarded. This rebuilds the
+    // exercises table to add category_id and applies the real assignments from
+    // db/exercise_categories.sql (generated from the source catalogue).
+    version: 6,
+    sql: `
+      CREATE TABLE IF NOT EXISTS exercise_categories (
+        id   TEXT PRIMARY KEY,
+        name TEXT NOT NULL
+      );
+      INSERT OR IGNORE INTO exercise_categories (id, name) VALUES
+        ('resistance','Resistance'),('cardio','Cardio'),
+        ('mobility','Mobility'),('stretching','Stretching'),('other','Other');
+
+      CREATE TABLE exercises_new (
+        id               TEXT PRIMARY KEY,
+        canonical_name   TEXT NOT NULL,
+        search_key       TEXT NOT NULL,
+        source_id        TEXT NOT NULL REFERENCES sources(id),
+        source_record_id TEXT,
+        unilateral       INTEGER NOT NULL DEFAULT 0 CHECK (unilateral IN (0,1)),
+        is_custom        INTEGER NOT NULL DEFAULT 0 CHECK (is_custom IN (0,1)),
+        is_deleted       INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1)),
+        variation_group  TEXT,
+        category_id      TEXT REFERENCES exercise_categories(id),
+        created_at       INTEGER NOT NULL,
+        updated_at       INTEGER NOT NULL
+      );
+      INSERT INTO exercises_new (id, canonical_name, search_key, source_id, source_record_id, unilateral, is_custom, is_deleted, variation_group, created_at, updated_at)
+        SELECT id, canonical_name, search_key, source_id, source_record_id, unilateral, is_custom, is_deleted, variation_group, created_at, updated_at
+        FROM exercises;
+      DROP TABLE exercises;
+      ALTER TABLE exercises_new RENAME TO exercises;
+      CREATE INDEX IF NOT EXISTS idx_ex_name ON exercises(canonical_name);
+      CREATE INDEX IF NOT EXISTS idx_ex_key  ON exercises(search_key);
+      CREATE INDEX IF NOT EXISTS idx_ex_cat  ON exercises(category_id);
+
+      ${exerciseCategoriesSql}
+
+      -- App-authored seed exercises are resistance work; assign explicitly.
+      UPDATE exercises SET category_id = 'resistance' WHERE id IN
+        ('e_bench','e_incline_db','e_squat','e_deadlift','e_ohp','e_pullup','e_row','e_rdl','e_latraise');
+
+      CREATE TABLE IF NOT EXISTS exercise_patterns (
+        exercise_id TEXT NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        pattern_id  TEXT NOT NULL REFERENCES movement_patterns(id),
+        PRIMARY KEY (exercise_id, pattern_id)
+      );
+      INSERT OR IGNORE INTO movement_patterns (id, name) VALUES
+        ('lunge','Lunge'),('carry','Carry');
+      INSERT OR IGNORE INTO exercise_patterns (exercise_id, pattern_id) VALUES
+        ('e_bench','horizontal_push'),('e_incline_db','horizontal_push'),
+        ('e_squat','squat'),('e_rdl','hinge'),('e_deadlift','hinge'),
+        ('e_ohp','vertical_push'),('e_pullup','vertical_pull'),('e_row','horizontal_pull');
     `,
   },
 ];

@@ -32,31 +32,50 @@ CREATE TABLE IF NOT EXISTS nutrients (
   targetable    INTEGER NOT NULL DEFAULT 0 CHECK (targetable IN (0,1))
 );
 
+-- Food taxonomy. Vocabulary-only: rows are created from real catalogue data
+-- only (see migrations v5/v6 backfills); NULL stays NULL (never inferred).
+CREATE TABLE IF NOT EXISTS food_types (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+-- Blood-key-taxonomy: food type / preparation / entry-kind are three
+-- independent classification axes. `category` is kept as legacy free-text
+-- provenance; `food_type_id` is the normalized taxonomy.
 CREATE TABLE IF NOT EXISTS foods (
-  id               TEXT PRIMARY KEY,
-  canonical_name   TEXT NOT NULL,
-  search_key       TEXT NOT NULL,
-  brand            TEXT,
-  category         TEXT,
-  prep_state       TEXT NOT NULL DEFAULT 'unknown'
-                     CHECK (prep_state IN ('raw','cooked','as_sold','prepared','unknown')),
-  basis            TEXT NOT NULL DEFAULT 'per_100g'
-                     CHECK (basis IN ('per_100g','per_100ml')),
-  language         TEXT,
-  region           TEXT,
-  source_id        TEXT NOT NULL REFERENCES sources(id),
-  source_record_id TEXT,
-  data_quality     TEXT NOT NULL DEFAULT 'unverified'
-                     CHECK (data_quality IN ('verified','derived','crowd','user','unverified')),
-  is_custom        INTEGER NOT NULL DEFAULT 0 CHECK (is_custom IN (0,1)),
-  is_recipe        INTEGER NOT NULL DEFAULT 0 CHECK (is_recipe IN (0,1)),
-  is_deleted       INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1)),
-  created_at       INTEGER NOT NULL,
-  updated_at       INTEGER NOT NULL
+  id                 TEXT PRIMARY KEY,
+  canonical_name     TEXT NOT NULL,
+  search_key         TEXT NOT NULL,
+  brand              TEXT,
+  category           TEXT,
+  food_type_id       TEXT REFERENCES food_types(id),
+  entry_type         TEXT CHECK (entry_type IN ('generic','prepared','branded','custom')),
+  manufacturer       TEXT,
+  product_variant    TEXT,
+  barcode            TEXT,
+  serving_description TEXT,
+  prep_state         TEXT NOT NULL DEFAULT 'unknown'
+                       CHECK (prep_state IN ('raw','cooked','boiled','steamed','roasted','fried','baked','dried','canned','frozen','as_sold','prepared','unknown')),
+  basis              TEXT NOT NULL DEFAULT 'per_100g'
+                       CHECK (basis IN ('per_100g','per_100ml')),
+  language           TEXT,
+  region             TEXT,
+  source_id          TEXT NOT NULL REFERENCES sources(id),
+  source_record_id   TEXT,
+  data_quality       TEXT NOT NULL DEFAULT 'unverified'
+                       CHECK (data_quality IN ('verified','derived','crowd','user','unverified')),
+  is_custom          INTEGER NOT NULL DEFAULT 0 CHECK (is_custom IN (0,1)),
+  is_recipe          INTEGER NOT NULL DEFAULT 0 CHECK (is_recipe IN (0,1)),
+  is_deleted         INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1)),
+  published_at       TEXT,
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_foods_name   ON foods(canonical_name);
 CREATE INDEX IF NOT EXISTS idx_foods_key    ON foods(search_key);
 CREATE INDEX IF NOT EXISTS idx_foods_custom ON foods(is_custom, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_foods_type   ON foods(food_type_id);
 
 CREATE TABLE IF NOT EXISTS food_nutrients (
   food_id      TEXT NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
@@ -100,6 +119,13 @@ CREATE TABLE IF NOT EXISTS movement_patterns (
   name TEXT NOT NULL
 );
 
+-- Exercise taxonomy: coarse category (resistance/cardio/mobility/...).
+-- One category per exercise; assignments come from real catalogue data only.
+CREATE TABLE IF NOT EXISTS exercise_categories (
+  id   TEXT PRIMARY KEY,
+  name TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS exercises (
   id               TEXT PRIMARY KEY,
   canonical_name   TEXT NOT NULL,
@@ -110,8 +136,18 @@ CREATE TABLE IF NOT EXISTS exercises (
   is_custom        INTEGER NOT NULL DEFAULT 0 CHECK (is_custom IN (0,1)),
   is_deleted       INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1)),
   variation_group  TEXT,
+  category_id      TEXT REFERENCES exercise_categories(id),
   created_at       INTEGER NOT NULL,
   updated_at       INTEGER NOT NULL
+);
+
+-- Curated movement-pattern assignments (real, known patterns only; the Free
+-- Exercise DB does not carry a movement-pattern field, so its ~885 entries
+-- stay unassigned rather than being inferred).
+CREATE TABLE IF NOT EXISTS exercise_patterns (
+  exercise_id TEXT NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+  pattern_id  TEXT NOT NULL REFERENCES movement_patterns(id),
+  PRIMARY KEY (exercise_id, pattern_id)
 );
 CREATE INDEX IF NOT EXISTS idx_ex_name ON exercises(canonical_name);
 CREATE INDEX IF NOT EXISTS idx_ex_key  ON exercises(search_key);
@@ -246,4 +282,32 @@ CREATE TABLE IF NOT EXISTS preferences (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,
   updated_at INTEGER NOT NULL
+);
+
+-- Body measurements are their own data category (NOT exercises): weight,
+-- height, body-fat %, waist. Timeseries keyed by local date.
+CREATE TABLE IF NOT EXISTS body_metrics (
+  id          TEXT PRIMARY KEY,
+  metric_type TEXT NOT NULL CHECK (metric_type IN ('weight_kg','height_cm','body_fat_pct','waist_cm','other')),
+  value       REAL NOT NULL,
+  local_date  TEXT NOT NULL,
+  note        TEXT,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_body_metrics_date ON body_metrics(metric_type, local_date);
+
+-- Cross-cutting favourites and recents (real user picks only).
+CREATE TABLE IF NOT EXISTS favorites (
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('food','exercise')),
+  entity_id   TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  PRIMARY KEY (entity_type, entity_id)
+);
+
+CREATE TABLE IF NOT EXISTS recent_uses (
+  entity_type  TEXT NOT NULL CHECK (entity_type IN ('food','exercise')),
+  entity_id    TEXT NOT NULL,
+  last_used_at INTEGER NOT NULL,
+  PRIMARY KEY (entity_type, entity_id)
 );

@@ -77,4 +77,12 @@ describe.skipIf(!hasRef)('reference pack integration (USDA CC0)', () => {
     expect(browse.length).toBe(25);
     expect(browse.some((f) => f.id.startsWith('usda:'))).toBe(true);
   });
+
+  it('returns unique curated food quick picks', () => {
+    const foods = repo.getPinnedFoods();
+    expect(foods.length).toBeGreaterThanOrEqual(6);
+    expect(new Set(foods.map((f) => f.id)).size).toBe(foods.length);
+    expect(foods.some((f) => f.name.toLowerCase().includes('chicken'))).toBe(true);
+    expect(foods.some((f) => f.name.toLowerCase().includes('rice'))).toBe(true);
+  });
 });

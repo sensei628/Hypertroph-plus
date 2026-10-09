@@ -48,6 +48,15 @@ describe('Free Exercise DB catalogue (Unlicense)', () => {
     expect(repo.countExercises('zzzzznope')).toBe(0);
   });
 
+  it('returns unique curated machine/dumbbell quick picks', () => {
+    const pinned = repo.getPinnedExercises();
+    expect(pinned.length).toBeGreaterThanOrEqual(9);
+    expect(new Set(pinned.map((e) => e.id)).size).toBe(pinned.length);
+    expect(pinned.some((e) => e.name.toLowerCase().includes('bench press'))).toBe(true);
+    expect(pinned.some((e) => e.name.toLowerCase().includes('squat'))).toBe(true);
+    expect(pinned.some((e) => e.name.toLowerCase().includes('curl'))).toBe(true);
+  });
+
   it('is idempotent when the SQL runs twice', () => {
     const before = repo.searchExercises('', 5000).length;
     db.run(exercisesSql);

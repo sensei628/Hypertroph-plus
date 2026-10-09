@@ -20,15 +20,34 @@ INSERT INTO nutrients (id, name, unit, kind, display_order, targetable) VALUES
   ('sugar_g',     'Sugar',    'g',    'macro',  6, 0),
   ('sodium_mg',   'Sodium',   'mg',   'micro',  7, 0);
 
+-- Food taxonomy vocabulary (app-authored; actual type assignments come only
+-- from real catalogue data, see repository/no-inference rule).
+INSERT INTO food_types (id, name, sort_order) VALUES
+  ('grains','Grains & cereals',1),
+  ('legumes','Pulses & legumes',2),
+  ('vegetables','Vegetables',3),
+  ('fruits','Fruits',4),
+  ('dairy','Dairy',5),
+  ('eggs','Eggs',6),
+  ('meat','Meat & poultry',7),
+  ('seafood','Seafood',8),
+  ('oils','Oils & fats',9),
+  ('nuts','Nuts & seeds',10),
+  ('snacks','Snacks & sweets',11),
+  ('beverages','Beverages',12),
+  ('supplements','Supplements',13),
+  ('mixed_dishes','Mixed dishes',14),
+  ('other','Other',99);
+
 -- Foods (amounts per 100 g, stored as amount * 1000). NULL = unknown.
-INSERT INTO foods (id, canonical_name, search_key, brand, category, prep_state, basis, language, source_id, source_record_id, data_quality, is_custom, is_recipe, created_at, updated_at) VALUES
-  ('f_oats',    'Oats, rolled, dry',        'oats rolled dry',     NULL, 'grains',   'raw',    'per_100g', 'en', 's_app', 'demo-1', 'derived', 0, 0, 1700000000000, 1700000000000),
-  ('f_greek',   'Greek yogurt, plain, 2%',  'greek yogurt plain 2','',   'dairy',    'as_sold','per_100g', 'en', 's_app', 'demo-2', 'derived', 0, 0, 1700000000000, 1700000000000),
-  ('f_berry',   'Blueberries, raw',         'blueberries raw',     NULL, 'fruit',    'raw',    'per_100g', 'en', 's_app', 'demo-3', 'derived', 0, 0, 1700000000000, 1700000000000),
-  ('f_chicken', 'Chicken breast, cooked',   'chicken breast cooked',NULL,'meat',     'cooked', 'per_100g', 'en', 's_app', 'demo-4', 'derived', 0, 0, 1700000000000, 1700000000000),
-  ('f_rice',    'White rice, cooked',       'white rice cooked',   NULL, 'grains',   'cooked', 'per_100g', 'en', 's_app', 'demo-5', 'derived', 0, 0, 1700000000000, 1700000000000),
-  ('f_oil',     'Olive oil',                'olive oil',           NULL, 'fats',     'as_sold','per_100g', 'en', 's_app', 'demo-6', 'derived', 0, 0, 1700000000000, 1700000000000),
-  ('f_whey',    'Whey protein powder',      'whey protein powder', NULL,'supplement','as_sold','per_100g','en','s_app','demo-7','derived',0,0,1700000000000,1700000000000);
+INSERT INTO foods (id, canonical_name, search_key, brand, category, food_type_id, entry_type, prep_state, basis, language, source_id, source_record_id, data_quality, is_custom, is_recipe, created_at, updated_at) VALUES
+  ('f_oats',    'Oats, rolled, dry',        'oats rolled dry',     NULL, 'grains',   'grains',     'generic',  'raw',    'per_100g', 'en', 's_app', 'demo-1', 'derived', 0, 0, 1700000000000, 1700000000000),
+  ('f_greek',   'Greek yogurt, plain, 2%',  'greek yogurt plain 2','',   'dairy',    'dairy',      'generic',  'as_sold','per_100g', 'en', 's_app', 'demo-2', 'derived', 0, 0, 1700000000000, 1700000000000),
+  ('f_berry',   'Blueberries, raw',         'blueberries raw',     NULL, 'fruit',    'fruits',     'generic',  'raw',    'per_100g', 'en', 's_app', 'demo-3', 'derived', 0, 0, 1700000000000, 1700000000000),
+  ('f_chicken', 'Chicken breast, cooked',   'chicken breast cooked',NULL,'meat',     'meat',       'generic',  'cooked', 'per_100g', 'en', 's_app', 'demo-4', 'derived', 0, 0, 1700000000000, 1700000000000),
+  ('f_rice',    'White rice, cooked',       'white rice cooked',   NULL, 'grains',   'grains',     'generic',  'cooked', 'per_100g', 'en', 's_app', 'demo-5', 'derived', 0, 0, 1700000000000, 1700000000000),
+  ('f_oil',     'Olive oil',                'olive oil',           NULL, 'fats',     'oils',       'generic',  'as_sold','per_100g', 'en', 's_app', 'demo-6', 'derived', 0, 0, 1700000000000, 1700000000000),
+  ('f_whey',    'Whey protein powder',      'whey protein powder', NULL,'supplement','supplements','generic', 'as_sold','per_100g','en','s_app','demo-7','derived',0,0,1700000000000,1700000000000);
 
 INSERT INTO food_nutrients (food_id, nutrient_id, amount_milli) VALUES
   ('f_oats','energy_kcal',389000),('f_oats','protein_g',16900),('f_oats','carb_g',66300),('f_oats','fat_g',6900),('f_oats','fiber_g',10600),('f_oats','sugar_g',1000),('f_oats','sodium_mg',2000),
@@ -64,18 +83,22 @@ INSERT INTO equipment (id, name) VALUES
   ('barbell','Barbell'),('dumbbell','Dumbbell'),('cable','Cable'),('machine','Machine'),('bodyweight','Bodyweight'),('band','Band'),('kettlebell','Kettlebell');
 
 INSERT INTO movement_patterns (id, name) VALUES
-  ('horizontal_push','Horizontal push'),('vertical_push','Vertical push'),('horizontal_pull','Horizontal pull'),('vertical_pull','Vertical pull'),('squat','Squat'),('hinge','Hinge');
+  ('horizontal_push','Horizontal push'),('vertical_push','Vertical push'),('horizontal_pull','Horizontal pull'),('vertical_pull','Vertical pull'),('squat','Squat'),('hinge','Hinge'),('lunge','Lunge'),('carry','Carry');
 
-INSERT INTO exercises (id, canonical_name, search_key, source_id, source_record_id, unilateral, is_custom, variation_group, created_at, updated_at) VALUES
-  ('e_bench',     'Barbell Bench Press',     'barbell bench press',     's_app',NULL,0,0,'bench',   1700000000000,1700000000000),
-  ('e_incline_db','Incline Dumbbell Press',  'incline dumbbell press',  's_app',NULL,0,0,'bench',  1700000000000,1700000000000),
-  ('e_squat',     'Back Squat',              'back squat',              's_app',NULL,0,0,'squat',   1700000000000,1700000000000),
-  ('e_deadlift',  'Deadlift',                'deadlift',                's_app',NULL,0,0,'hinge',     1700000000000,1700000000000),
-  ('e_ohp',       'Overhead Press',          'overhead press',          's_app',NULL,0,0,'press',    1700000000000,1700000000000),
-  ('e_pullup',    'Pull-Up',                 'pull up',                 's_app',NULL,0,0,'pull',   1700000000000,1700000000000),
-  ('e_row',       'Barbell Row',             'barbell row',             's_app',NULL,0,0,'row',     1700000000000,1700000000000),
-  ('e_rdl',       'Romanian Deadlift',       'romanian deadlift',       's_app',NULL,0,0,'hinge',   1700000000000,1700000000000),
-  ('e_latraise',  'Dumbbell Lateral Raise',  'dumbbell lateral raise',  's_app',NULL,0,1,'raise',   1700000000000,1700000000000);
+-- Exercise taxonomy vocabulary (assignments from real catalogue data only).
+INSERT INTO exercise_categories (id, name) VALUES
+  ('resistance','Resistance'),('cardio','Cardio'),('mobility','Mobility'),('stretching','Stretching'),('other','Other');
+
+INSERT INTO exercises (id, canonical_name, search_key, source_id, source_record_id, unilateral, is_custom, variation_group, category_id, created_at, updated_at) VALUES
+  ('e_bench',     'Barbell Bench Press',     'barbell bench press',     's_app',NULL,0,0,'bench','resistance', 1700000000000,1700000000000),
+  ('e_incline_db','Incline Dumbbell Press',  'incline dumbbell press',  's_app',NULL,0,0,'bench','resistance', 1700000000000,1700000000000),
+  ('e_squat',     'Back Squat',              'back squat',              's_app',NULL,0,0,'squat','resistance', 1700000000000,1700000000000),
+  ('e_deadlift',  'Deadlift',                'deadlift',                's_app',NULL,0,0,'hinge','resistance', 1700000000000,1700000000000),
+  ('e_ohp',       'Overhead Press',          'overhead press',          's_app',NULL,0,0,'press','resistance', 1700000000000,1700000000000),
+  ('e_pullup',    'Pull-Up',                 'pull up',                 's_app',NULL,0,0,'pull','resistance', 1700000000000,1700000000000),
+  ('e_row',       'Barbell Row',             'barbell row',             's_app',NULL,0,0,'row','resistance', 1700000000000,1700000000000),
+  ('e_rdl',       'Romanian Deadlift',       'romanian deadlift',       's_app',NULL,0,0,'hinge','resistance', 1700000000000,1700000000000),
+  ('e_latraise',  'Dumbbell Lateral Raise',  'dumbbell lateral raise',  's_app',NULL,0,1,'raise','resistance', 1700000000000,1700000000000);
 
 INSERT INTO exercise_aliases (id, exercise_id, alias, language) VALUES
   ('ea_bench1','e_bench','bench press','en'),('ea_bench2','e_bench','bp','en'),('ea_ohp1','e_ohp','OHP','en'),('ea_ohp2','e_ohp','military press','en'),('ea_pullup1','e_pullup','pullups','en'),('ea_lat1','e_latraise','lateral raise','en');
@@ -93,6 +116,14 @@ INSERT INTO exercise_muscles (exercise_id, muscle_id, role) VALUES
 
 INSERT INTO exercise_equipment (exercise_id, equipment_id) VALUES
   ('e_bench','barbell'),('e_incline_db','dumbbell'),('e_squat','barbell'),('e_deadlift','barbell'),('e_ohp','barbell'),('e_pullup','bodyweight'),('e_row','barbell'),('e_rdl','barbell'),('e_latraise','dumbbell');
+
+-- Movement patterns for the app-authored exercises only. These are known by
+-- construction (they are not inferred); the full Free Exercise DB has no
+-- movement-pattern field and is left unassigned.
+INSERT INTO exercise_patterns (exercise_id, pattern_id) VALUES
+  ('e_bench','horizontal_push'),('e_incline_db','horizontal_push'),
+  ('e_squat','squat'),('e_rdl','hinge'),('e_deadlift','hinge'),
+  ('e_ohp','vertical_push'),('e_pullup','vertical_pull'),('e_row','horizontal_pull');
 
 INSERT INTO preferences (key, value, updated_at) VALUES
   ('units.mass', '"kg"', 1700000000000),

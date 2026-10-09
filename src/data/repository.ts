@@ -35,6 +35,64 @@ const REF_CODE_TO_APP: Record<string, string> = {
   sodium: 'sodium_mg',
 };
 
+// USDA FoodData Central `data_type` -> app entry_type. Real provenance only:
+// Survey (FNDDS) foods are "as consumed", Foundation/SR Legacy are generic
+// whole foods. Branded is supported by the schema but the catalogue contains
+// no Branded rows, so that facet stays visibly empty (never inferred).
+export const REF_DATA_TYPE_TO_ENTRY_TYPE: Record<string, string> = {
+  Foundation: 'generic',
+  'SR Legacy': 'generic',
+  'Survey (FNDDS)': 'prepared',
+  Branded: 'branded',
+};
+
+// USDA FoodData Central `food_category` -> app food_type. Mapped from the real
+// category vocabulary of the imported pack; foods whose category has no app
+// equivalent stay NULL (never inferred). Survey rows carry an empty category.
+export const REF_CATEGORY_TO_FOOD_TYPE: Record<string, string> = {
+  'Beef Products': 'meat',
+  'Vegetables and Vegetable Products': 'vegetables',
+  'Baked Products': 'grains',
+  'Lamb, Veal, and Game Products': 'meat',
+  'Fruits and Fruit Juices': 'fruits',
+  'Poultry Products': 'meat',
+  'Beverages': 'beverages',
+  'Sweets': 'snacks',
+  'Baby Foods': 'mixed_dishes',
+  'Pork Products': 'meat',
+  'Dairy and Egg Products': 'dairy',
+  'Legumes and Legume Products': 'legumes',
+  'Fast Foods': 'mixed_dishes',
+  'Finfish and Shellfish Products': 'seafood',
+  'Soups, Sauces, and Gravies': 'mixed_dishes',
+  'Fats and Oils': 'oils',
+  'Cereal Grains and Pasta': 'grains',
+  'Breakfast Cereals': 'grains',
+  'Snacks': 'snacks',
+  'Sausages and Luncheon Meats': 'meat',
+  'American Indian/Alaska Native Foods': 'other',
+  'Nut and Seed Products': 'nuts',
+  'Restaurant Foods': 'mixed_dishes',
+  'Meals, Entrees, and Side Dishes': 'mixed_dishes',
+  'Spices and Herbs': 'other',
+};
+
+// Curated quick-pick lists shown at the top of each picker so common foods and
+// machine/dumbbell exercises stay one keystroke away while browsing.
+const PINNED_FOOD_KEYWORDS = ['chicken breast', 'rice', 'eggs', 'lentils', 'beans', 'cauliflower', 'lettuce'];
+const PINNED_EXERCISE_KEYWORDS = [
+  'bench press',
+  'squat',
+  'deadlift',
+  'lat pulldown',
+  'cable row',
+  'leg press',
+  'dumbbell shoulder press',
+  'dumbbell curl',
+  'triceps pushdown',
+  'lateral raise',
+];
+
 function refPortionLabel(p: {
   amount: number | null;
   modifier: string | null;
@@ -61,11 +119,20 @@ export interface FoodSummary {
   id: string;
   name: string;
   brand: string | null;
+  foodTypeId: string | null;
+  entryType: string | null;
   prepState: string;
   basis: string;
   quality: string;
   sourceId: string;
+  publishedAt: string | null;
   matchedAlias: string | null;
+}
+
+export interface FoodFilters {
+  foodTypeId?: string | null;
+  entryType?: string | null;
+  prepState?: string | null;
 }
 
 export interface PortionRow {
@@ -93,9 +160,45 @@ export interface ExerciseSummary {
   id: string;
   name: string;
   unilateral: boolean;
+  categoryId: string | null;
   equipment: string[];
   primaryMuscles: string[];
   matchedAlias: string | null;
+}
+
+export interface ExerciseFilters {
+  categoryId?: string | null;
+  equipmentId?: string | null;
+  muscleId?: string | null;
+}
+
+export interface FacetValue {
+  id: string;
+  name: string;
+  count: number;
+}
+
+export interface FoodFacets {
+  foodTypes: FacetValue[];
+  entryTypes: FacetValue[];
+  prepStates: FacetValue[];
+}
+
+export interface ExerciseFacets {
+  categories: FacetValue[];
+  equipment: FacetValue[];
+  muscles: FacetValue[];
+}
+
+export type BodyMetricType = 'weight_kg' | 'height_cm' | 'body_fat_pct' | 'waist_cm' | 'other';
+
+export interface BodyMetric {
+  id: string;
+  metricType: BodyMetricType;
+  value: number;
+  localDate: string;
+  note: string | null;
+  createdAt: number;
 }
 
 export interface LogSetInput {
@@ -140,11 +243,21 @@ export interface DataPort {
   getPreference(key: string, fallback: string): string;
   setPreference(key: string, value: string | readonly string[]): void;
 
-  searchFoods(query: string, limit?: number): FoodSummary[];
-  countFoods(query: string): number;
+  searchFoods(query: string, limit?: number, filters?: FoodFilters): FoodSummary[];
+  countFoods(query: string, filters?: FoodFilters): number;
+  getFoodFacets(query: string): FoodFacets;
+  getPinnedFoods(): FoodSummary[];
   getFood(id: string): FoodDetail | null;
   recentFoods(limit?: number): FoodSummary[];
+  recentUses(entityType: 'food' | 'exercise', limit?: number): string[];
+  touchUse(entityType: 'food' | 'exercise', id: string): void;
+  favoriteIds(entityType: 'food' | 'exercise'): Set<string>;
+  toggleFavorite(entityType: 'food' | 'exercise', id: string): void;
   createCustomFood(name: string, nutrients: NutrientValue[]): FoodDetail;
+
+  addBodyMetric(input: { metricType: BodyMetricType; value: number; localDate: string; note?: string }): void;
+  getBodyMetrics(metricType: BodyMetricType, limit?: number): BodyMetric[];
+  deleteBodyMetric(id: string): void;
 
   logFood(input: {
     foodId: string;
@@ -158,8 +271,11 @@ export interface DataPort {
   deleteLogItem(id: string): void;
   getUsedMealSections(): string[];
 
-  searchExercises(query: string, limit?: number): ExerciseSummary[];
-  countExercises(query: string): number;
+  searchExercises(query: string, limit?: number, filters?: ExerciseFilters): ExerciseSummary[];
+  countExercises(query: string, filters?: ExerciseFilters): number;
+  getExerciseFacets(query: string): ExerciseFacets;
+  getPinnedExercises(): ExerciseSummary[];
+  getExercise(id: string): ExerciseSummary | null;
   getExerciseMuscles(id: string): { primary: string[]; secondary: string[] };
   getMuscleNames(): Map<string, string>;
 
@@ -241,46 +357,52 @@ export class SqliteRepository implements DataPort {
   }
 
   // ── foods ────────────────────────────────────────────────
-  searchFoods(query: string, limit = 25): FoodSummary[] {
+  searchFoods(query: string, limit = 25, filters?: FoodFilters): FoodSummary[] {
     const key = normalizeKey(query);
     const excludeRef = this.ref ? " AND source_id <> 's_usda'" : '';
+    const fw = localFoodFilter(filters);
     if (!key) {
       // Browsing the catalogue (empty query): list local foods, then fill from
       // the reference pack so the full catalog is reachable without typing.
       const local = this.rows<Record<string, unknown>>(
-        `SELECT id, canonical_name, brand, prep_state, basis, data_quality, source_id FROM foods
-         WHERE is_deleted = 0${excludeRef} ORDER BY canonical_name LIMIT ?`,
-        [limit],
+        `SELECT id, canonical_name, brand, food_type_id, entry_type, prep_state, basis, data_quality, source_id, published_at
+         FROM foods
+         WHERE is_deleted = 0${excludeRef}${fw.sql}
+         ORDER BY canonical_name LIMIT ?`,
+        [...fw.params, limit],
       ).map(mapFood);
-      return [...local, ...this.refBrowse(limit - local.length)];
+      return [...local, ...this.refBrowse(limit - local.length, filters)];
     }
     const like = `%${key}%`;
     const prefix = `${key}%`;
     const escaped = key.replace(/([%_])/g, '\\$1');
     // Rank: alias match, then name-prefix, then name-substring.
     const local = this.rows<Record<string, unknown>>(
-      `SELECT f.id, f.canonical_name, f.brand, f.prep_state, f.basis, f.data_quality, f.source_id,
+      `SELECT f.id, f.canonical_name, f.brand, f.food_type_id, f.entry_type, f.prep_state, f.basis, f.data_quality, f.source_id, f.published_at,
               (SELECT a.alias FROM food_aliases a WHERE a.food_id = f.id AND a.alias LIKE ? LIMIT 1) AS matched_alias,
               CASE WHEN f.search_key LIKE ? THEN 0 ELSE 1 END AS rank
        FROM foods f
        WHERE f.is_deleted = 0${this.ref ? " AND f.source_id <> 's_usda'" : ''}
          AND (f.search_key LIKE ? OR f.id IN (SELECT food_id FROM food_aliases WHERE lower(alias) LIKE ?))
+         ${fw.sql}
        ORDER BY rank, length(f.canonical_name) LIMIT ?`,
-      [like, prefix, like, like, limit],
+      [like, prefix, like, like, ...fw.params, limit],
     ).map(mapFood);
     void escaped;
     const remaining = limit - local.length;
     if (remaining <= 0) return local;
-    return [...local, ...this.refSearch(key, remaining)];
+    return [...local, ...this.refSearch(key, remaining, filters)];
   }
 
-  /** Total foods matching a query (mirrors searchFoods' criteria). */
-  countFoods(query: string): number {
+  /** Total foods matching a query and filters (mirrors searchFoods). */
+  countFoods(query: string, filters?: FoodFilters): number {
     const key = normalizeKey(query);
     const excludeRef = this.ref ? " AND source_id <> 's_usda'" : '';
+    const fw = localFoodFilter(filters);
     if (!key) {
-      const local = this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM foods WHERE is_deleted = 0${excludeRef}`)[0]?.n ?? 0;
-      const ref = this.ref ? this.refRows<{ n: number }>('SELECT COUNT(*) AS n FROM foods')[0].n : 0;
+      const local =
+        this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM foods WHERE is_deleted = 0${excludeRef}${fw.sql}`, fw.params)[0]?.n ?? 0;
+      const ref = this.ref ? this.refCountRef(filters) : 0;
       return local + ref;
     }
     const like = `%${key}%`;
@@ -288,41 +410,178 @@ export class SqliteRepository implements DataPort {
       this.rows<{ n: number }>(
         `SELECT COUNT(*) AS n FROM foods f
          WHERE f.is_deleted = 0${excludeRef}
-           AND (f.search_key LIKE ? OR f.id IN (SELECT food_id FROM food_aliases WHERE lower(alias) LIKE ?))`,
-        [like, like],
+           AND (f.search_key LIKE ? OR f.id IN (SELECT food_id FROM food_aliases WHERE lower(alias) LIKE ?))
+           ${fw.sql}`,
+        [like, like, ...fw.params],
       )[0]?.n ?? 0;
-    const ref = this.ref
-      ? this.refRows<{ n: number }>('SELECT COUNT(*) AS n FROM foods WHERE search_key LIKE ?', [like])[0].n
-      : 0;
+    const ref = this.ref ? this.refCount(key, filters) : 0;
     return local + ref;
   }
 
-  private refBrowse(limit: number): FoodSummary[] {
+  /**
+   * Facet counts (food type / entry kind / prep) for the catalogue matching
+   * `query`. Every vocabulary value is present so the UI renders facets that
+   * are legitimately empty (e.g. branded) without mistaking them for missing.
+   */
+  getFoodFacets(query: string): FoodFacets {
+    const key = normalizeKey(query);
+    const like = key ? `%${key}%` : '%';
+
+    // Local counts. Materialized ref copies are excluded to avoid double
+    // counting against the ref pack (mirrors searchFoods).
+    const types = new Map<string, number>();
+    const entries = new Map<string, number>();
+    const preps = new Map<string, number>();
+    for (const r of this.rows<{ id: string; n: number }>(
+      `SELECT f.food_type_id AS id, COUNT(*) AS n FROM foods f
+       WHERE f.is_deleted = 0 AND f.source_id <> 's_usda' AND (f.search_key LIKE ?)
+       GROUP BY f.food_type_id`,
+      [like],
+    )) {
+      if (r.id) types.set(r.id, r.n);
+    }
+    for (const r of this.rows<{ id: string; n: number }>(
+      `SELECT f.entry_type AS id, COUNT(*) AS n FROM foods f
+       WHERE f.is_deleted = 0 AND f.source_id <> 's_usda' AND (f.search_key LIKE ?)
+       GROUP BY f.entry_type`,
+      [like],
+    )) {
+      if (r.id) entries.set(r.id, r.n);
+    }
+    for (const r of this.rows<{ id: string; n: number }>(
+      `SELECT f.prep_state AS id, COUNT(*) AS n FROM foods f
+       WHERE f.is_deleted = 0 AND f.source_id <> 's_usda' AND (f.search_key LIKE ?)
+       GROUP BY f.prep_state`,
+      [like],
+    )) {
+      if (r.id) preps.set(r.id, r.n);
+    }
+
+    // Reference-pack counts (mapped through the real USDA category/data_type).
+    if (this.ref) {
+      const byCat = new Map<string, number>();
+      for (const r of this.refRows<{ food_category: string | null; n: number }>(
+        `SELECT food_category, COUNT(*) AS n FROM foods WHERE search_key LIKE ? GROUP BY food_category`,
+        [like],
+      )) {
+        if (r.food_category) byCat.set(r.food_category, r.n);
+      }
+      for (const r of this.refRows<{ data_type: string | null; n: number }>(
+        `SELECT data_type, COUNT(*) AS n FROM foods WHERE search_key LIKE ? GROUP BY data_type`,
+        [like],
+      )) {
+        if (r.data_type) {
+          const t = REF_DATA_TYPE_TO_ENTRY_TYPE[r.data_type];
+          if (t) entries.set(t, (entries.get(t) ?? 0) + r.n);
+        }
+      }
+      for (const [cat, n] of byCat) {
+        const t = REF_CATEGORY_TO_FOOD_TYPE[cat];
+        if (t) types.set(t, (types.get(t) ?? 0) + n);
+      }
+      // Reference foods have no prep metadata; they are all 'unknown'.
+      const totalRef = this.refRows<{ n: number }>(`SELECT COUNT(*) AS n FROM foods WHERE search_key LIKE ?`, [like])[0].n;
+      if (totalRef > 0) preps.set('unknown', (preps.get('unknown') ?? 0) + totalRef);
+    }
+
+    return {
+      foodTypes: FOOD_TYPE_VOCAB.map(([id, name]) => ({ id, name, count: types.get(id) ?? 0 })),
+      entryTypes: ENTRY_TYPE_VOCAB.map(([id]) => ({ id, name: ENTRY_TYPE_VOCAB_BY_ID[id], count: entries.get(id) ?? 0 })),
+      prepStates: PREP_STATE_VOCAB.map(([id]) => ({ id, name: PREP_STATE_VOCAB_BY_ID[id], count: preps.get(id) ?? 0 })),
+    };
+  }
+
+  /** Top hit for each curated food keyword, deduped. */
+  getPinnedFoods(): FoodSummary[] {
+    const out: FoodSummary[] = [];
+    const seen = new Set<string>();
+    for (const kw of PINNED_FOOD_KEYWORDS) {
+      const hit = this.searchFoods(kw, 1)[0];
+      if (hit && !seen.has(hit.id)) {
+        seen.add(hit.id);
+        out.push(hit);
+      }
+    }
+    return out;
+  }
+
+  /** Top hit for each curated exercise keyword, deduped. */
+  getPinnedExercises(): ExerciseSummary[] {
+    const out: ExerciseSummary[] = [];
+    const seen = new Set<string>();
+    for (const kw of PINNED_EXERCISE_KEYWORDS) {
+      const hit = this.searchExercises(kw, 1)[0];
+      if (hit && !seen.has(hit.id)) {
+        seen.add(hit.id);
+        out.push(hit);
+      }
+    }
+    return out;
+  }
+
+  private refBrowse(limit: number, filters?: FoodFilters): FoodSummary[] {
     if (!this.ref || limit <= 0) return [];
+    const preds = refFilterPredicates(filters);
+    const where = preds.length ? `WHERE ${preds.join(' AND ')}` : '';
     return this.refRows<{ fdc_id: number; description: string }>(
-      `SELECT fdc_id, description FROM foods ORDER BY description LIMIT ?`,
+      `SELECT fdc_id, description FROM foods ${where} ORDER BY description LIMIT ?`,
       [limit],
     ).map((r) => this.refFood(r));
   }
 
-  private refSearch(key: string, limit: number): FoodSummary[] {
+  private refSearch(key: string, limit: number, filters?: FoodFilters): FoodSummary[] {
     if (!this.ref || !key || limit <= 0) return [];
+    const preds = refFilterPredicates(filters);
+    const and = preds.length ? ` AND ${preds.join(' AND ')}` : '';
     return this.refRows<{ fdc_id: number; description: string }>(
       `SELECT fdc_id, description FROM foods
-       WHERE search_key LIKE ? ORDER BY length(description) LIMIT ?`,
+       WHERE search_key LIKE ?${and} ORDER BY length(description) LIMIT ?`,
       [`%${key}%`, limit],
     ).map((r) => this.refFood(r));
   }
 
+  private refCount(key: string | null, filters?: FoodFilters): number {
+    if (!this.ref) return 0;
+    const preds = refFilterPredicates(filters);
+    const where = preds.length ? `WHERE ${preds.join(' AND ')}` : '';
+    return key
+      ? this.refRows<{ n: number }>(`SELECT COUNT(*) AS n FROM foods WHERE search_key LIKE ?${preds.length ? ' AND ' + preds.join(' AND ') : ''}`, [`%${key}%`])[0].n
+      : this.refRows<{ n: number }>(`SELECT COUNT(*) AS n FROM foods ${where}`)[0].n;
+  }
+
+  private refCountRef(filters?: FoodFilters): number {
+    if (!this.ref) return 0;
+    const preds = refFilterPredicates(filters);
+    const where = preds.length ? `WHERE ${preds.join(' AND ')}` : '';
+    return this.refRows<{ n: number }>(`SELECT COUNT(*) AS n FROM foods ${where}`)[0].n;
+  }
+
   private refFood(r: { fdc_id: number; description: string }): FoodSummary {
+    let foodTypeId: string | null = null;
+    let entryType: string | null = null;
+    let publishedAt: string | null = null;
+    if (this.ref) {
+      const meta = this.refRows<{ food_category: string | null; data_type: string; publication_date: string | null }>(
+        'SELECT food_category, data_type, publication_date FROM foods WHERE fdc_id = ?',
+        [r.fdc_id],
+      )[0];
+      if (meta) {
+        foodTypeId = meta.food_category ? (REF_CATEGORY_TO_FOOD_TYPE[meta.food_category] ?? null) : null;
+        entryType = REF_DATA_TYPE_TO_ENTRY_TYPE[meta.data_type] ?? null;
+        publishedAt = meta.publication_date;
+      }
+    }
     return {
       id: `${REF_PREFIX}${r.fdc_id}`,
       name: r.description,
       brand: null,
+      foodTypeId,
+      entryType,
       prepState: 'unknown',
       basis: 'per_100g',
       quality: 'verified',
       sourceId: 's_usda',
+      publishedAt,
       matchedAlias: null,
     };
   }
@@ -330,7 +589,7 @@ export class SqliteRepository implements DataPort {
   getFood(id: string): FoodDetail | null {
     if (id.startsWith(REF_PREFIX)) return this.getRefFood(id);
     const row = this.rows<Record<string, unknown>>(
-      `SELECT id, canonical_name, brand, prep_state, basis, data_quality, source_id FROM foods WHERE id = ?`,
+      `SELECT id, canonical_name, brand, food_type_id, entry_type, prep_state, basis, data_quality, source_id, published_at FROM foods WHERE id = ?`,
       [id],
     )[0];
     if (!row) return null;
@@ -349,11 +608,14 @@ export class SqliteRepository implements DataPort {
     if (!this.ref) return null;
     const fdc = Number(id.slice(REF_PREFIX.length));
     if (!Number.isFinite(fdc)) return null;
-    const row = this.refRows<{ description: string }>(
-      'SELECT description FROM foods WHERE fdc_id = ?',
+    const row = this.refRows<{ description: string; food_category: string | null; data_type: string; publication_date: string | null }>(
+      'SELECT description, food_category, data_type, publication_date FROM foods WHERE fdc_id = ?',
       [fdc],
     )[0];
     if (!row) return null;
+
+    const foodTypeId = row.food_category ? (REF_CATEGORY_TO_FOOD_TYPE[row.food_category] ?? null) : null;
+    const entryType = REF_DATA_TYPE_TO_ENTRY_TYPE[row.data_type] ?? null;
 
     const codes = Object.keys(REF_CODE_TO_APP);
     const placeholders = codes.map(() => '?').join(',');
@@ -388,10 +650,13 @@ export class SqliteRepository implements DataPort {
       id,
       name: row.description,
       brand: null,
+      foodTypeId,
+      entryType,
       prepState: 'unknown',
       basis: 'per_100g',
       quality: 'verified',
       sourceId: 's_usda',
+      publishedAt: row.publication_date,
       matchedAlias: null,
       nutrients,
       portions,
@@ -416,10 +681,10 @@ export class SqliteRepository implements DataPort {
     this.db.run('BEGIN');
     try {
       this.run(
-        `INSERT INTO foods (id, canonical_name, search_key, brand, category, prep_state, basis, language,
-                            source_id, source_record_id, data_quality, is_custom, is_recipe, created_at, updated_at)
-         VALUES (?, ?, ?, NULL, NULL, 'unknown', 'per_100g', 'en', 's_usda', ?, 'derived', 0, 0, ?, ?)`,
-        [id, food.name, normalizeKey(food.name), fdc, now, now],
+        `INSERT INTO foods (id, canonical_name, search_key, brand, category, food_type_id, entry_type, prep_state, basis, language,
+                            source_id, source_record_id, data_quality, is_custom, is_recipe, published_at, created_at, updated_at)
+         VALUES (?, ?, ?, NULL, NULL, ?, ?, 'unknown', 'per_100g', 'en', 's_usda', ?, 'derived', 0, 0, ?, ?, ?)`,
+        [id, food.name, normalizeKey(food.name), food.foodTypeId, food.entryType, fdc, food.publishedAt, now, now],
       );
       for (const n of food.nutrients) {
         this.run('INSERT INTO food_nutrients (food_id, nutrient_id, amount_milli) VALUES (?, ?, ?)', [
@@ -444,7 +709,7 @@ export class SqliteRepository implements DataPort {
 
   recentFoods(limit = 12): FoodSummary[] {
     return this.rows<Record<string, unknown>>(
-      `SELECT f.id, f.canonical_name, f.brand, f.prep_state, f.basis, f.data_quality, f.source_id,
+      `SELECT f.id, f.canonical_name, f.brand, f.food_type_id, f.entry_type, f.prep_state, f.basis, f.data_quality, f.source_id, f.published_at,
               NULL AS matched_alias, MAX(li.created_at) AS last_used
        FROM log_items li JOIN foods f ON f.id = li.food_id
        WHERE li.is_deleted = 0 AND li.food_id IS NOT NULL
@@ -453,14 +718,57 @@ export class SqliteRepository implements DataPort {
     ).map(mapFood);
   }
 
+  /** Recently picked entity ids (latest first) from the lightweight recent_uses table. */
+  recentUses(entityType: 'food' | 'exercise', limit = 12): string[] {
+    return this.rows<{ entity_id: string }>(
+      'SELECT entity_id FROM recent_uses WHERE entity_type = ? ORDER BY last_used_at DESC LIMIT ?',
+      [entityType, limit],
+    ).map((r) => r.entity_id);
+  }
+
+  favoriteIds(entityType: 'food' | 'exercise'): Set<string> {
+    return new Set(
+      this.rows<{ entity_id: string }>('SELECT entity_id FROM favorites WHERE entity_type = ?', [entityType]).map(
+        (r) => r.entity_id,
+      ),
+    );
+  }
+
+  toggleFavorite(entityType: 'food' | 'exercise', id: string): void {
+    const exists = this.rows<{ entity_id: string }>(
+      'SELECT entity_id FROM favorites WHERE entity_type = ? AND entity_id = ?',
+      [entityType, id],
+    )[0];
+    if (exists) {
+      this.run('DELETE FROM favorites WHERE entity_type = ? AND entity_id = ?', [entityType, id]);
+    } else {
+      this.run('INSERT INTO favorites (entity_type, entity_id, created_at) VALUES (?, ?, ?)', [
+        entityType,
+        id,
+        Date.now(),
+      ]);
+    }
+    this.commit();
+  }
+
+  /** Record that an entity was picked/used (drives recent_uses ordering). */
+  touchUse(entityType: 'food' | 'exercise', id: string): void {
+    this.run(
+      `INSERT INTO recent_uses (entity_type, entity_id, last_used_at) VALUES (?, ?, ?)
+       ON CONFLICT(entity_type, entity_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
+      [entityType, id, Date.now()],
+    );
+    this.commit();
+  }
+
   createCustomFood(name: string, nutrients: NutrientValue[]): FoodDetail {
     const id = `food_${uid()}`;
     const now = Date.now();
     this.db.run('BEGIN');
     try {
       this.run(
-        `INSERT INTO foods (id, canonical_name, search_key, prep_state, basis, source_id, data_quality, is_custom, is_recipe, created_at, updated_at)
-         VALUES (?, ?, ?, 'unknown', 'per_100g', 's_user', 'user', 1, 0, ?, ?)`,
+        `INSERT INTO foods (id, canonical_name, search_key, entry_type, prep_state, basis, source_id, data_quality, is_custom, is_recipe, created_at, updated_at)
+         VALUES (?, ?, ?, 'custom', 'unknown', 'per_100g', 's_user', 'user', 1, 0, ?, ?)`,
         [id, name, normalizeKey(name), now, now],
       );
       for (const n of nutrients) {
@@ -479,6 +787,35 @@ export class SqliteRepository implements DataPort {
     return this.getFood(id)!;
   }
 
+  addBodyMetric(input: { metricType: BodyMetricType; value: number; localDate: string; note?: string }): void {
+    this.run(
+      `INSERT INTO body_metrics (id, metric_type, value, local_date, note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [uid(), input.metricType, input.value, input.localDate, input.note ?? null, Date.now(), Date.now()],
+    );
+    this.commit();
+  }
+
+  getBodyMetrics(metricType: BodyMetricType, limit = 30): BodyMetric[] {
+    return this.rows<{ id: string; metric_type: string; value: number; local_date: string; note: string | null; created_at: number }>(
+      `SELECT id, metric_type, value, local_date, note, created_at FROM body_metrics
+       WHERE metric_type = ? ORDER BY local_date DESC, created_at DESC LIMIT ?`,
+      [metricType, limit],
+    ).map((r) => ({
+      id: r.id,
+      metricType: r.metric_type as BodyMetricType,
+      value: r.value,
+      localDate: r.local_date,
+      note: r.note,
+      createdAt: r.created_at,
+    }));
+  }
+
+  deleteBodyMetric(id: string): void {
+    this.run('DELETE FROM body_metrics WHERE id = ?', [id]);
+    this.commit();
+  }
+
   // ── logging ──────────────────────────────────────────────
   logFood(input: {
     foodId: string;
@@ -491,6 +828,7 @@ export class SqliteRepository implements DataPort {
     const food = this.getFood(input.foodId);
     if (!food) throw new Error(`Unknown food: ${input.foodId}`);
     const localFoodId = this.ensureLocalFood(food);
+    this.touchUse('food', input.foodId);
     const foodLike: FoodLike = { id: food.id, name: food.name, basis: food.basis as FoodLike['basis'], nutrients: food.nutrients };
     const item: LogItem = snapshotLogItem({ food: foodLike, quantityG: input.quantityG });
     const logId = `log_${uid()}`;
@@ -553,16 +891,23 @@ export class SqliteRepository implements DataPort {
   }
 
   // ── exercises / training ─────────────────────────────────
-  searchExercises(query: string, limit = 25): ExerciseSummary[] {
+  searchExercises(query: string, limit = 25, filters?: ExerciseFilters): ExerciseSummary[] {
     const key = normalizeKey(query);
+    const fw = localExerciseFilter(filters);
     const rows = this.rows<Record<string, unknown>>(
-      `SELECT e.id, e.canonical_name, e.unilateral,
+      `SELECT e.id, e.canonical_name, e.unilateral, e.category_id,
               (SELECT a.alias FROM exercise_aliases a WHERE a.exercise_id = e.id AND lower(a.alias) LIKE ? LIMIT 1) AS matched_alias
        FROM exercises e
        WHERE e.is_deleted = 0 AND (? = '' OR e.search_key LIKE ? OR e.id IN (SELECT exercise_id FROM exercise_aliases WHERE lower(alias) LIKE ?))
+         ${fw.sql}
        ORDER BY length(e.canonical_name) LIMIT ?`,
-      [`%${key}%`, key, `%${key}%`, `%${key}%`, limit],
+      [`%${key}%`, key, `%${key}%`, `%${key}%`, ...fw.params, limit],
     );
+    return this.toExerciseSummaries(rows);
+  }
+
+  private toExerciseSummaries(rows: Record<string, unknown>[]): ExerciseSummary[] {
+    if (!rows.length) return [];
     const equipment = this.groupBy(
       'SELECT ee.exercise_id AS k, eq.name AS v FROM exercise_equipment ee JOIN equipment eq ON eq.id = ee.equipment_id',
     );
@@ -573,22 +918,84 @@ export class SqliteRepository implements DataPort {
       id: r.id as string,
       name: r.canonical_name as string,
       unilateral: r.unilateral === 1,
+      categoryId: (r.category_id as string) ?? null,
       equipment: equipment.get(r.id as string) ?? [],
       primaryMuscles: primary.get(r.id as string) ?? [],
       matchedAlias: (r.matched_alias as string) ?? null,
     }));
   }
 
-  /** Total exercises matching a query (mirrors searchExercises' criteria). */
-  countExercises(query: string): number {
+  getExercise(id: string): ExerciseSummary | null {
+    const rows = this.rows<Record<string, unknown>>(
+      `SELECT e.id, e.canonical_name, e.unilateral, e.category_id, NULL AS matched_alias
+       FROM exercises e WHERE e.id = ? AND e.is_deleted = 0`,
+      [id],
+    );
+    return this.toExerciseSummaries(rows)[0] ?? null;
+  }
+
+  /** Total exercises matching a query and filters (mirrors searchExercises). */
+  countExercises(query: string, filters?: ExerciseFilters): number {
     const key = normalizeKey(query);
+    const fw = localExerciseFilter(filters);
     return (
       this.rows<{ n: number }>(
         `SELECT COUNT(*) AS n FROM exercises e
-         WHERE e.is_deleted = 0 AND (? = '' OR e.search_key LIKE ? OR e.id IN (SELECT exercise_id FROM exercise_aliases WHERE lower(alias) LIKE ?))`,
-        [key, `%${key}%`, `%${key}%`],
+         WHERE e.is_deleted = 0 AND (? = '' OR e.search_key LIKE ? OR e.id IN (SELECT exercise_id FROM exercise_aliases WHERE lower(alias) LIKE ?))
+         ${fw.sql}`,
+        [key, `%${key}%`, `%${key}%`, ...fw.params],
       )[0]?.n ?? 0
     );
+  }
+
+  /** Exercise facet counts for the catalogue matching `query`. */
+  getExerciseFacets(query: string): ExerciseFacets {
+    const key = normalizeKey(query);
+    const like = key ? `%${key}%` : '%';
+
+    const categories = new Map<string, number>();
+    for (const r of this.rows<{ id: string; n: number }>(
+      `SELECT e.category_id AS id, COUNT(*) AS n FROM exercises e
+       WHERE e.is_deleted = 0 AND (? = '' OR e.search_key LIKE ? OR e.id IN (SELECT exercise_id FROM exercise_aliases WHERE lower(alias) LIKE ?))
+       GROUP BY e.category_id`,
+      [key, like, like],
+    )) {
+      if (r.id) categories.set(r.id, r.n);
+    }
+
+    const equipment = new Map<string, number>();
+    for (const r of this.rows<{ id: string; n: number }>(
+      `SELECT eq.id AS id, COUNT(*) AS n FROM exercise_equipment ee
+       JOIN equipment eq ON eq.id = ee.equipment_id
+       JOIN exercises e ON e.id = ee.exercise_id
+       WHERE e.is_deleted = 0 AND (? = '' OR e.search_key LIKE ? OR e.id IN (SELECT exercise_id FROM exercise_aliases WHERE lower(alias) LIKE ?))
+       GROUP BY eq.id`,
+      [key, like, like],
+    )) {
+      equipment.set(r.id, r.n);
+    }
+
+    const muscles = new Map<string, number>();
+    for (const r of this.rows<{ id: string; n: number }>(
+      `SELECT m.id AS id, COUNT(*) AS n FROM exercise_muscles em
+       JOIN muscles m ON m.id = em.muscle_id
+       JOIN exercises e ON e.id = em.exercise_id
+       WHERE em.role = 'primary' AND e.is_deleted = 0 AND (? = '' OR e.search_key LIKE ? OR e.id IN (SELECT exercise_id FROM exercise_aliases WHERE lower(alias) LIKE ?))
+       GROUP BY m.id`,
+      [key, like, like],
+    )) {
+      muscles.set(r.id, r.n);
+    }
+
+    return {
+      categories: EXERCISE_CATEGORY_VOCAB.map(([id]) => ({
+        id,
+        name: EXERCISE_CATEGORY_VOCAB_BY_ID[id],
+        count: categories.get(id) ?? 0,
+      })),
+      equipment: EQUIPMENT_VOCAB.map(([id, name]) => ({ id, name, count: equipment.get(id) ?? 0 })),
+      muscles: MUSCLE_COUNTS_VOCAB.map(([id, name]) => ({ id, name, count: muscles.get(id) ?? 0 })),
+    };
   }
 
   getExerciseMuscles(id: string): { primary: string[]; secondary: string[] } {
@@ -637,6 +1044,7 @@ export class SqliteRepository implements DataPort {
       exerciseId,
       seq,
     ]);
+    this.touchUse('exercise', exerciseId);
     this.commit();
     return id;
   }
@@ -818,10 +1226,180 @@ function mapFood(r: Record<string, unknown>): FoodSummary {
     id: r.id as string,
     name: r.canonical_name as string,
     brand: (r.brand as string) || null,
+    foodTypeId: (r.food_type_id as string) ?? null,
+    entryType: (r.entry_type as string) ?? null,
     prepState: (r.prep_state as string) ?? 'unknown',
     basis: (r.basis as string) ?? 'per_100g',
     quality: (r.data_quality as string) ?? 'unverified',
     sourceId: r.source_id as string,
+    publishedAt: (r.published_at as string) ?? null,
     matchedAlias: (r.matched_alias as string) ?? null,
   };
+}
+
+// Vocabulary lists used for facets. Fixed ids (real schema values); displayed
+// names come from the schema vocabulary tables at runtime where possible and
+// from app-authored labels otherwise. Kept in sync with db/schema.sql + db/seed.sql.
+export const FOOD_TYPE_VOCAB: [string, string][] = [
+  ['grains', 'Grains & cereals'],
+  ['legumes', 'Pulses & legumes'],
+  ['vegetables', 'Vegetables'],
+  ['fruits', 'Fruits'],
+  ['dairy', 'Dairy'],
+  ['eggs', 'Eggs'],
+  ['meat', 'Meat & poultry'],
+  ['seafood', 'Seafood'],
+  ['oils', 'Oils & fats'],
+  ['nuts', 'Nuts & seeds'],
+  ['snacks', 'Snacks & sweets'],
+  ['beverages', 'Beverages'],
+  ['supplements', 'Supplements'],
+  ['mixed_dishes', 'Mixed dishes'],
+  ['other', 'Other'],
+];
+
+export const ENTRY_TYPE_VOCAB: [string, string][] = [
+  ['generic', 'Generic'],
+  ['prepared', 'Prepared'],
+  ['branded', 'Branded'],
+  ['custom', 'My foods'],
+];
+
+const ENTRY_TYPE_VOCAB_BY_ID = Object.fromEntries(ENTRY_TYPE_VOCAB);
+
+export const PREP_STATE_VOCAB: [string, string][] = [
+  ['raw', 'Raw'],
+  ['cooked', 'Cooked'],
+  ['boiled', 'Boiled'],
+  ['steamed', 'Steamed'],
+  ['roasted', 'Roasted'],
+  ['fried', 'Fried'],
+  ['baked', 'Baked'],
+  ['dried', 'Dried'],
+  ['canned', 'Canned'],
+  ['frozen', 'Frozen'],
+  ['as_sold', 'As sold'],
+  ['prepared', 'Prepared'],
+  ['unknown', 'Unknown'],
+];
+
+const PREP_STATE_VOCAB_BY_ID = Object.fromEntries(PREP_STATE_VOCAB);
+
+export const EXERCISE_CATEGORY_VOCAB: [string, string][] = [
+  ['resistance', 'Resistance'],
+  ['cardio', 'Cardio'],
+  ['mobility', 'Mobility'],
+  ['stretching', 'Stretching'],
+  ['other', 'Other'],
+];
+
+const EXERCISE_CATEGORY_VOCAB_BY_ID = Object.fromEntries(EXERCISE_CATEGORY_VOCAB);
+
+// Exercise devices from the Free Exercise DB importer + app seed.
+export const EQUIPMENT_VOCAB: [string, string][] = [
+  ['barbell', 'Barbell'],
+  ['dumbbell', 'Dumbbell'],
+  ['cable', 'Cable'],
+  ['machine', 'Machine'],
+  ['bodyweight', 'Bodyweight'],
+  ['band', 'Band'],
+  ['kettlebell', 'Kettlebell'],
+  ['ez_bar', 'E-Z curl bar'],
+  ['medicine_ball', 'Medicine ball'],
+  ['exercise_ball', 'Exercise ball'],
+];
+
+// Primary-muscle facets (muscles actually used by exercises in the catalogue).
+export const MUSCLE_COUNTS_VOCAB: [string, string][] = [
+  ['chest', 'Chest'],
+  ['shoulders', 'Shoulders'],
+  ['triceps', 'Triceps'],
+  ['biceps', 'Biceps'],
+  ['back', 'Back'],
+  ['lats', 'Lats'],
+  ['traps', 'Traps'],
+  ['forearms', 'Forearms'],
+  ['core', 'Core'],
+  ['neck', 'Neck'],
+  ['quads', 'Quads'],
+  ['hamstrings', 'Hamstrings'],
+  ['glutes', 'Glutes'],
+  ['calves', 'Calves'],
+  ['adductors', 'Adductors'],
+  ['abductors', 'Abductors'],
+];
+
+// Body metrics the user can log in the Metrics tab.
+export const BODY_METRIC_TYPES: [BodyMetricType, string][] = [
+  ['weight_kg', 'Weight (kg)'],
+  ['body_fat_pct', 'Body fat (%)'],
+  ['height_cm', 'Height (cm)'],
+  ['waist_cm', 'Waist (cm)'],
+  ['other', 'Other'],
+];
+
+/** WHERE fragment + params for food facet filters against the local foods table. */
+function localFoodFilter(filters?: FoodFilters): { sql: string; params: unknown[] } {
+  if (!filters) return { sql: '', params: [] };
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (filters.foodTypeId) {
+    clauses.push('food_type_id = ?');
+    params.push(filters.foodTypeId);
+  }
+  if (filters.entryType) {
+    clauses.push('entry_type = ?');
+    params.push(filters.entryType);
+  }
+  if (filters.prepState) {
+    clauses.push('prep_state = ?');
+    params.push(filters.prepState);
+  }
+  return { sql: clauses.length ? ` AND ${clauses.join(' AND ')}` : '', params };
+}
+
+/** WHERE fragment + params for exercise facet filters against the exercises table. */
+function localExerciseFilter(filters?: ExerciseFilters): { sql: string; params: unknown[] } {
+  if (!filters) return { sql: '', params: [] };
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (filters.categoryId) {
+    clauses.push('e.category_id = ?');
+    params.push(filters.categoryId);
+  }
+  if (filters.equipmentId) {
+    clauses.push(
+      'e.id IN (SELECT exercise_id FROM exercise_equipment WHERE equipment_id = ?)',
+    );
+    params.push(filters.equipmentId);
+  }
+  if (filters.muscleId) {
+    clauses.push(
+      'e.id IN (SELECT exercise_id FROM exercise_muscles WHERE muscle_id = ? AND role = \'primary\')',
+    );
+    params.push(filters.muscleId);
+  }
+  return { sql: clauses.length ? ` AND ${clauses.join(' AND ')}` : '', params };
+}
+
+/** WHERE-fragment predicates for reference-pack food filters (ref schema columns). */
+function refFilterPredicates(filters?: FoodFilters): string[] {
+  if (!filters) return [];
+  const parts: string[] = [];
+  if (filters.foodTypeId) {
+    const cats = Object.entries(REF_CATEGORY_TO_FOOD_TYPE)
+      .filter(([, t]) => t === filters.foodTypeId)
+      .map(([c]) => `'${c.replace(/'/g, "''")}'`);
+    if (!cats.length) return ['(0)'];
+    parts.push(`(food_category IN (${cats.join(',')}))`);
+  }
+  if (filters.entryType) {
+    const dts = Object.entries(REF_DATA_TYPE_TO_ENTRY_TYPE)
+      .filter(([, t]) => t === filters.entryType)
+      .map(([d]) => `'${d.replace(/'/g, "''")}'`);
+    if (!dts.length) return ['(0)'];
+    parts.push(`(data_type IN (${dts.join(',')}))`);
+  }
+  if (filters.prepState && filters.prepState !== 'unknown') return ['(0)'];
+  return parts;
 }
