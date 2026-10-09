@@ -23,6 +23,13 @@ Bundled datasets:
 Licence: https://fdc.nal.usda.gov/api-guide.html
 
 --------------------------------------------------------------------------------
+Free Exercise DB
+--------------------------------------------------------------------------------
+Exercise catalogue (names, muscles, equipment) from Free Exercise DB
+(https://github.com/yuhonas/free-exercise-db), released under The Unlicense
+(unlicense.org) into the public domain. Bundled artifact: db/exercises.sql.
+
+--------------------------------------------------------------------------------
 hypertroph+ original data
 --------------------------------------------------------------------------------
 Seed/demo foods and exercises, muscle maps, and unit/prep taxonomies are original

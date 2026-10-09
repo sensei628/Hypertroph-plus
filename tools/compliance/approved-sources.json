@@ -30,16 +30,15 @@
     },
     {
       "id": "free_exercise_db",
-      "aliases": [],
-      "name": "Free Exercise DB (yuhonas)",
+      "aliases": ["s_exdb"],
+      "name": "Free Exercise DB",
       "license": "Unlicense",
-      "licenseUrl": "https://github.com/yuhonas/free-exercise-db",
+      "licenseUrl": "https://github.com/yuhonas/free-exercise-db/blob/master/LICENSE",
       "url": "https://github.com/yuhonas/free-exercise-db",
       "redistribution": "allowed",
       "attributionRequired": false,
-      "attribution": null,
-      "bundled": false,
-      "note": "Approved / public domain, but not currently bundled; seed exercises are app-authored."
+      "attribution": "Exercise data from Free Exercise DB (unlicense.org, public domain).",
+      "bundled": true
     },
     {
       "id": "open_food_facts",

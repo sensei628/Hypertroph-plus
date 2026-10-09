@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { loadDatabase } from '../data/db';
+import { loadRefDatabase } from '../data/refdb';
 import {
   SqliteRepository,
   type DayItemRow,
@@ -78,7 +79,8 @@ export function App() {
     (async () => {
       try {
         const db = await loadDatabase();
-        const r = new SqliteRepository(db);
+        const ref = await loadRefDatabase();
+        const r = new SqliteRepository(db, ref);
         if (cancelled) return;
         setRepo(r);
         setNutrientDefs(r.getNutrientDefs());

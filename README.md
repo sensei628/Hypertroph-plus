@@ -38,8 +38,9 @@ hypertroph+ ships as an offline, redistributable product with **no paid licences
 full provenance register is [`DATA_LICENSES.md`](./DATA_LICENSES.md).
 
 - **Bundled:** USDA FoodData Central (CC0 1.0, public domain) as
-  `public/hypertroph-ref.sqlite.gz`, plus app-authored data. Attribution is in
-  [`public/ATTRIBUTION.txt`](./public/ATTRIBUTION.txt).
+  `public/hypertroph-ref.sqlite.gz` (13,588 foods, searched at runtime), Free Exercise DB
+  (The Unlicense, public domain) as `db/exercises.sql` (876 exercises), plus app-authored
+  data. Attribution is in [`public/ATTRIBUTION.txt`](./public/ATTRIBUTION.txt).
 - **Excluded entirely (not supported, not importable):** ICMR-NIN IFCT 2017 / RDA, and
   FSANZ AUSNUT / AFCD / NUTTAB — copyrighted; no loaders, no templates, no code path.
 

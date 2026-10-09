@@ -6,6 +6,11 @@
       "path": "public/hypertroph-ref.sqlite.gz",
       "sourceId": "usda_fdc",
       "description": "USDA FDC reference database: Foundation + SR Legacy + FNDDS (13,588 foods)."
+    },
+    {
+      "path": "db/exercises.sql",
+      "sourceId": "free_exercise_db",
+      "description": "Free Exercise DB catalogue (The Unlicense, public domain): 876 exercises with muscle/equipment maps."
     }
   ],
   "appOwned": [

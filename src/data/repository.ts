@@ -1,6 +1,6 @@
 import type { DB } from './db';
 import { persist } from './db';
-import { NutrientUnit, Milli } from '../domain/nutrients';
+import { NutrientUnit, Milli, toMilli } from '../domain/nutrients';
 import { NutrientValue, LoggedNutrient, LogItem, snapshotLogItem, FoodLike } from '../domain/nutrition';
 import { SetRecord, SetWithExercise, PRKind, evaluateSet, PRState, emptyPRState, workingSetVolumeByMuscle } from '../domain/training';
 
@@ -16,6 +16,36 @@ export function normalizeKey(s: string): string {
 function uid(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
   return `id_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+}
+
+// Reference-pack integration. Reference foods live in a separate, read-only
+// SQLite DB and are addressed by a namespaced id. The first time a reference
+// food is logged it is copied into the user DB, so logged history/recents keep
+// working against the user schema and the reference pack is never mutated.
+const REF_PREFIX = 'usda:';
+
+/** Reference nutrient `code` -> app nutrient id. Only the app's core set is used. */
+const REF_CODE_TO_APP: Record<string, string> = {
+  energy_kcal: 'energy_kcal',
+  protein: 'protein_g',
+  fat: 'fat_g',
+  carb: 'carb_g',
+  fiber: 'fiber_g',
+  sugars: 'sugar_g',
+  sodium: 'sodium_mg',
+};
+
+function refPortionLabel(p: {
+  amount: number | null;
+  modifier: string | null;
+  measure_name: string | null;
+  measure_abbr: string | null;
+}): string {
+  const modifier = p.modifier && p.modifier.trim();
+  if (modifier) return modifier;
+  const measure = p.measure_name || p.measure_abbr || 'serving';
+  const amount = p.amount ?? 1;
+  return `${amount} ${measure}`;
 }
 
 export interface NutrientDef {
@@ -139,18 +169,14 @@ export interface DataPort {
 }
 
 export class SqliteRepository implements DataPort {
-  constructor(private db: DB) {}
+  constructor(private db: DB, private ref: DB | null = null) {}
 
   private rows<T>(sql: string, params: unknown[] = []): T[] {
-    const stmt = this.db.prepare(sql);
-    try {
-      stmt.bind(params as never);
-      const out: T[] = [];
-      while (stmt.step()) out.push(stmt.getAsObject() as unknown as T);
-      return out;
-    } finally {
-      stmt.free();
-    }
+    return queryAll<T>(this.db, sql, params);
+  }
+
+  private refRows<T>(sql: string, params: unknown[] = []): T[] {
+    return this.ref ? queryAll<T>(this.ref, sql, params) : [];
   }
 
   private run(sql: string, params: unknown[] = []): void {
@@ -214,10 +240,11 @@ export class SqliteRepository implements DataPort {
   // ── foods ────────────────────────────────────────────────
   searchFoods(query: string, limit = 25): FoodSummary[] {
     const key = normalizeKey(query);
+    const excludeRef = this.ref ? " AND source_id <> 's_usda'" : '';
     if (!key) {
       return this.rows<Record<string, unknown>>(
         `SELECT id, canonical_name, brand, prep_state, basis, data_quality, source_id FROM foods
-         WHERE is_deleted = 0 ORDER BY canonical_name LIMIT ?`,
+         WHERE is_deleted = 0${excludeRef} ORDER BY canonical_name LIMIT ?`,
         [limit],
       ).map(mapFood);
     }
@@ -225,20 +252,42 @@ export class SqliteRepository implements DataPort {
     const prefix = `${key}%`;
     const escaped = key.replace(/([%_])/g, '\\$1');
     // Rank: alias match, then name-prefix, then name-substring.
-    const foodRows = this.rows<Record<string, unknown>>(
+    const local = this.rows<Record<string, unknown>>(
       `SELECT f.id, f.canonical_name, f.brand, f.prep_state, f.basis, f.data_quality, f.source_id,
               (SELECT a.alias FROM food_aliases a WHERE a.food_id = f.id AND a.alias LIKE ? LIMIT 1) AS matched_alias,
               CASE WHEN f.search_key LIKE ? THEN 0 ELSE 1 END AS rank
        FROM foods f
-       WHERE f.is_deleted = 0 AND (f.search_key LIKE ? OR f.id IN (SELECT food_id FROM food_aliases WHERE lower(alias) LIKE ?))
+       WHERE f.is_deleted = 0${this.ref ? " AND f.source_id <> 's_usda'" : ''}
+         AND (f.search_key LIKE ? OR f.id IN (SELECT food_id FROM food_aliases WHERE lower(alias) LIKE ?))
        ORDER BY rank, length(f.canonical_name) LIMIT ?`,
       [like, prefix, like, like, limit],
-    );
+    ).map(mapFood);
     void escaped;
-    return foodRows.map(mapFood);
+    const remaining = limit - local.length;
+    if (remaining <= 0) return local;
+    return [...local, ...this.refSearch(key, remaining)];
+  }
+
+  private refSearch(key: string, limit: number): FoodSummary[] {
+    if (!this.ref || !key || limit <= 0) return [];
+    return this.refRows<{ fdc_id: number; description: string }>(
+      `SELECT fdc_id, description FROM foods
+       WHERE search_key LIKE ? ORDER BY length(description) LIMIT ?`,
+      [`%${key}%`, limit],
+    ).map((r) => ({
+      id: `${REF_PREFIX}${r.fdc_id}`,
+      name: r.description,
+      brand: null,
+      prepState: 'unknown',
+      basis: 'per_100g',
+      quality: 'verified',
+      sourceId: 's_usda',
+      matchedAlias: null,
+    }));
   }
 
   getFood(id: string): FoodDetail | null {
+    if (id.startsWith(REF_PREFIX)) return this.getRefFood(id);
     const row = this.rows<Record<string, unknown>>(
       `SELECT id, canonical_name, brand, prep_state, basis, data_quality, source_id FROM foods WHERE id = ?`,
       [id],
@@ -253,6 +302,103 @@ export class SqliteRepository implements DataPort {
       [id],
     ).map((p) => ({ id: p.id, label: p.label, gramWeight: p.gram_weight, isDefault: p.is_default === 1 }));
     return { ...mapFood(row), nutrients, portions };
+  }
+
+  private getRefFood(id: string): FoodDetail | null {
+    if (!this.ref) return null;
+    const fdc = Number(id.slice(REF_PREFIX.length));
+    if (!Number.isFinite(fdc)) return null;
+    const row = this.refRows<{ description: string }>(
+      'SELECT description FROM foods WHERE fdc_id = ?',
+      [fdc],
+    )[0];
+    if (!row) return null;
+
+    const codes = Object.keys(REF_CODE_TO_APP);
+    const placeholders = codes.map(() => '?').join(',');
+    const nutrients = this.refRows<{ code: string; amount: number }>(
+      `SELECT n.code AS code, fn.amount AS amount
+       FROM food_nutrients fn JOIN nutrients n ON n.id = fn.nutrient_id
+       WHERE fn.food_id = ? AND fn.amount IS NOT NULL AND n.code IN (${placeholders})`,
+      [fdc, ...codes],
+    ).map((n) => ({ nutrientId: REF_CODE_TO_APP[n.code], amountMilli: toMilli(n.amount) }));
+
+    const portions = this.refRows<{
+      id: number | null;
+      amount: number | null;
+      modifier: string | null;
+      measure_name: string | null;
+      measure_abbr: string | null;
+      gram_weight: number;
+    }>(
+      `SELECT id, amount, modifier, measure_name, measure_abbr, gram_weight
+       FROM food_portions
+       WHERE food_id = ? AND gram_weight IS NOT NULL AND gram_weight > 0
+       ORDER BY seq`,
+      [fdc],
+    ).map((p, i) => ({
+      id: `${REF_PREFIX}p${p.id ?? `${fdc}_${i}`}`,
+      label: refPortionLabel(p),
+      gramWeight: p.gram_weight,
+      isDefault: i === 0,
+    }));
+
+    return {
+      id,
+      name: row.description,
+      brand: null,
+      prepState: 'unknown',
+      basis: 'per_100g',
+      quality: 'verified',
+      sourceId: 's_usda',
+      matchedAlias: null,
+      nutrients,
+      portions,
+    };
+  }
+
+  /**
+   * Materialize a reference food into the user DB on first log so that
+   * log_items.food_id (FK) and recents/history work against the local schema.
+   */
+  private ensureLocalFood(food: FoodDetail): string {
+    if (!food.id.startsWith(REF_PREFIX)) return food.id;
+    const fdc = food.id.slice(REF_PREFIX.length);
+    const existing = this.rows<{ id: string }>(
+      "SELECT id FROM foods WHERE source_id = 's_usda' AND source_record_id = ? LIMIT 1",
+      [fdc],
+    )[0];
+    if (existing) return existing.id;
+
+    const id = `food_${uid()}`;
+    const now = Date.now();
+    this.db.run('BEGIN');
+    try {
+      this.run(
+        `INSERT INTO foods (id, canonical_name, search_key, brand, category, prep_state, basis, language,
+                            source_id, source_record_id, data_quality, is_custom, is_recipe, created_at, updated_at)
+         VALUES (?, ?, ?, NULL, NULL, 'unknown', 'per_100g', 'en', 's_usda', ?, 'derived', 0, 0, ?, ?)`,
+        [id, food.name, normalizeKey(food.name), fdc, now, now],
+      );
+      for (const n of food.nutrients) {
+        this.run('INSERT INTO food_nutrients (food_id, nutrient_id, amount_milli) VALUES (?, ?, ?)', [
+          id,
+          n.nutrientId,
+          n.amountMilli,
+        ]);
+      }
+      food.portions.forEach((p, i) => {
+        this.run(
+          'INSERT INTO food_portions (id, food_id, label, gram_weight, is_default, seq) VALUES (?, ?, ?, ?, ?, ?)',
+          [`p_${uid()}`, id, p.label, p.gramWeight, p.isDefault ? 1 : 0, i],
+        );
+      });
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    return id;
   }
 
   recentFoods(limit = 12): FoodSummary[] {
@@ -303,6 +449,7 @@ export class SqliteRepository implements DataPort {
   }): void {
     const food = this.getFood(input.foodId);
     if (!food) throw new Error(`Unknown food: ${input.foodId}`);
+    const localFoodId = this.ensureLocalFood(food);
     const foodLike: FoodLike = { id: food.id, name: food.name, basis: food.basis as FoodLike['basis'], nutrients: food.nutrients };
     const item: LogItem = snapshotLogItem({ food: foodLike, quantityG: input.quantityG });
     const logId = `log_${uid()}`;
@@ -317,7 +464,7 @@ export class SqliteRepository implements DataPort {
       this.run(
         `INSERT INTO log_items (id, local_date, meal_section, food_id, label, quantity_g, portion_label, source_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [logId, input.localDate, input.mealSection, input.foodId, item.label, item.quantityG, input.portionLabel ?? null, food.sourceId, now, now],
+        [logId, input.localDate, input.mealSection, localFoodId, item.label, item.quantityG, input.portionLabel ?? null, food.sourceId, now, now],
       );
       for (const n of item.nutrients) {
         this.run(
@@ -591,6 +738,18 @@ export class SqliteRepository implements DataPort {
 
   private commit(): void {
     persist(this.db);
+  }
+}
+
+function queryAll<T>(db: DB, sql: string, params: unknown[]): T[] {
+  const stmt = db.prepare(sql);
+  try {
+    stmt.bind(params as never);
+    const out: T[] = [];
+    while (stmt.step()) out.push(stmt.getAsObject() as unknown as T);
+    return out;
+  } finally {
+    stmt.free();
   }
 }
 

@@ -14,6 +14,8 @@
     "data:compliance": "node tools/compliance/check-compliance.mjs",
     "data:download:usda": "powershell -ExecutionPolicy Bypass -File tools/import/download-usda.ps1",
     "data:build:usda": "node tools/import/build-usda.mjs",
+    "data:download:exercises": "powershell -ExecutionPolicy Bypass -File tools/import/download-exercises.ps1",
+    "data:build:exercises": "node tools/import/import-exercises.mjs",
     "data:verify": "node tools/import/verify-ref.mjs"
   },
   "dependencies": {

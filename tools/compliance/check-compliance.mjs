@@ -2,7 +2,7 @@
 // Compliance guard for hypertroph+.
 //
 // Fails (exit 1) if:
-//   * db/seed.sql references an unknown source id
+//   * seed/import SQL (db/seed.sql, db/exercises.sql) references an unknown source id
 //   * a bundled data asset references an unknown source, or a source that is not
 //     redistribution:"allowed"
 //   * a bundled asset (public/ or dist/) or a git-tracked file name contains an
@@ -70,18 +70,24 @@ function resolveSource(token) {
   return byToken.get(token) ?? null;
 }
 
-// ── 1. source ids referenced by the app seed ────────────────────────────────
-const seed = readText('db/seed.sql');
-if (seed == null) {
-  fail('missing db/seed.sql');
-} else {
-  const ids = new Set();
-  for (const m of seed.matchAll(/'((?:s|src)_[a-z0-9_]+)'/g)) ids.add(m[1]);
-  for (const id of ids) {
-    if (!resolveSource(id)) fail(`db/seed.sql references unknown source id '${id}'`);
+// ── 1. source ids referenced by the app seed / imported data ────────────────
+const sourceFiles = ['db/seed.sql', 'db/exercises.sql'];
+const seedIds = new Set();
+let anySourceFile = false;
+for (const rel of sourceFiles) {
+  const txt = readText(rel);
+  if (txt == null) {
+    if (rel === 'db/seed.sql') fail('missing db/seed.sql');
+    continue;
   }
-  notes.push(`seed.sql source ids: ${[...ids].join(', ') || '(none)'}`);
+  anySourceFile = true;
+  for (const m of txt.matchAll(/'((?:s|src)_[a-z0-9_]+)'/g)) seedIds.add(m[1]);
 }
+if (!anySourceFile) fail('no seed/import SQL found');
+for (const id of seedIds) {
+  if (!resolveSource(id)) fail(`seed/import SQL references unknown source id '${id}'`);
+}
+notes.push(`seed/import source ids: ${[...seedIds].join(', ') || '(none)'}`);
 
 // ── 2. bundled data assets ──────────────────────────────────────────────────
 const forbidden = (allowlist.forbiddenPatterns ?? []).map((p) => p.toLowerCase());
