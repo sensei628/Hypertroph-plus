@@ -18,7 +18,8 @@ real data model, the integrity guarantees, and the core UX flows.
 | Training loop: start workout → add exercise → log sets → PR → finish | Done |
 | Dashboard, progress (weekly volume), settings (units/targets) | Done |
 | Command palette + keyboard flow | Done |
-| Tauri/Rust shell, installers, FTS5, data packs | **Not yet** (planned) |
+| Native shells: desktop (Electron, auto-update) + mobile (Capacitor) | Done |
+| FTS5 search, packaged data packs | **Not yet** (planned) |
 
 ## Run it
 
@@ -26,7 +27,7 @@ real data model, the integrity guarantees, and the core UX flows.
 npm.cmd install
 npm.cmd run dev      # dev server
 npm.cmd run build    # typecheck + production build
-npm.cmd run test     # 23 unit + integration tests
+npm.cmd run test     # 66 unit + integration tests
 ```
 
 > On this machine the PowerShell `npm` shim is blocked by execution policy; use `npm.cmd`
@@ -43,6 +44,21 @@ backup/restore are native additions. No backend, no account, no network.
 npm run cap:sync          # build web bundle + copy into android/ and ios/
 npm run mobile:android    # open the Android project (needs Android Studio/SDK)
 npm run mobile:ios        # open the iOS project (needs macOS/Xcode)
+```
+
+## Desktop (Windows)
+
+The same app ships as a native Windows desktop app via **Electron**
+(see [`DESKTOP.md`](./DESKTOP.md)). It loads the identical web bundle, stores the
+database in a real file (`%APPDATA%\hypertroph+\hypertroph.db`) with atomic
+writes, and **auto-updates already-installed copies** from GitHub Releases
+(`electron-updater`): updates download in the background and install on quit,
+with a manual *Check for updates* button in Settings.
+
+```bash
+npm run desktop:start     # build + launch the app (dev)
+npm run desktop:dist      # build an installer into ./release (no publish)
+npm run desktop:release   # build + publish to GitHub Releases (needs GH_TOKEN)
 ```
 
 ## Data & licensing

@@ -1,15 +1,18 @@
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
+import { getDesktopBridge } from '../desktop';
 
 /**
  * Where the SQLite image lives.
  *
  * The tracking logic and SQLite schema are unchanged from the web build; only
  * the byte store differs by platform:
- *   • web    -> localStorage (base64 image, the original behavior)
- *   • native -> a real file in the app's private data directory (Capacitor
- *               Filesystem), so the database survives restarts, is not capped
- *               by the WebView localStorage quota, and can be backed up.
+ *   • web     -> localStorage (base64 image, the original behavior)
+ *   • native  -> a real file in the app's private data directory (Capacitor
+ *                Filesystem), so the database survives restarts, is not capped
+ *                by the WebView localStorage quota, and can be backed up.
+ *   • desktop -> a real file in the OS user-data directory, written through the
+ *                Electron preload bridge (atomic write on the main process).
  *
  * `save()` keeps the original synchronous signature so the repository never
  * had to change. On native the (potentially large) write is debounced and
@@ -155,6 +158,78 @@ class NativeDbStorage implements DbStorage {
   }
 }
 
+class DesktopDbStorage implements DbStorage {
+  readonly kind = 'native' as const;
+  private pending: Uint8Array | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private writing: Promise<void> | null = null;
+
+  async load(): Promise<Uint8Array | null> {
+    const bridge = getDesktopBridge();
+    if (!bridge) return null;
+    try {
+      const bytes = await bridge.loadDb();
+      return bytes && bytes.length ? bytes : null;
+    } catch {
+      // First launch: no file yet.
+      return null;
+    }
+  }
+
+  save(bytes: Uint8Array): void {
+    this.pending = bytes;
+    if (this.timer) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.drain();
+    }, 200);
+  }
+
+  private async drain(): Promise<void> {
+    if (this.writing || !this.pending) return;
+    const bytes = this.pending;
+    this.pending = null;
+    this.writing = this.writeNow(bytes).finally(() => {
+      this.writing = null;
+    });
+    await this.writing;
+    if (this.pending) await this.drain();
+  }
+
+  private async writeNow(bytes: Uint8Array): Promise<void> {
+    const bridge = getDesktopBridge();
+    if (!bridge) return;
+    try {
+      // Copy so the structured-clone transfer carries exactly this buffer.
+      await bridge.saveDb(new Uint8Array(bytes));
+    } catch (e) {
+      console.error('Failed to persist database to desktop storage', e);
+    }
+  }
+
+  async flush(): Promise<void> {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (this.writing) await this.writing;
+    if (this.pending) await this.drain();
+  }
+
+  async reset(): Promise<void> {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.pending = null;
+    try {
+      await getDesktopBridge()?.resetDb();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function detectNative(): boolean {
   try {
     return typeof window !== 'undefined' && Capacitor.isNativePlatform();
@@ -163,4 +238,12 @@ function detectNative(): boolean {
   }
 }
 
-export const storage: DbStorage = detectNative() ? new NativeDbStorage() : new WebDbStorage();
+function detectDesktop(): boolean {
+  return typeof window !== 'undefined' && !!getDesktopBridge();
+}
+
+export const storage: DbStorage = detectDesktop()
+  ? new DesktopDbStorage()
+  : detectNative()
+    ? new NativeDbStorage()
+    : new WebDbStorage();

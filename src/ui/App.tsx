@@ -3,6 +3,7 @@ import { App as CapApp } from '@capacitor/app';
 import { loadDatabase, exportDatabaseBytes, flushPersistence, type DB } from '../data/db';
 import { loadRefDatabase } from '../data/refdb';
 import { exportBackup, importBackup } from '../data/backup';
+import { getDesktopBridge, type UpdateStatus } from '../desktop';
 import {
   SqliteRepository,
   type BodyMetricType,
@@ -134,6 +135,10 @@ export function App() {
   const [customOpen, setCustomOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  const desktop = getDesktopBridge();
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -230,6 +235,29 @@ export function App() {
       setToast(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }, []);
+
+  // Desktop update lifecycle: show the version and stream update status from the
+  // Electron main process (auto-download + install-on-quit, or a manual check).
+  useEffect(() => {
+    if (!desktop) return;
+    let cancelled = false;
+    void desktop.getAppInfo().then((info) => {
+      if (!cancelled) setAppVersion(info.version);
+    });
+    const off = desktop.onUpdateStatus((s) => setUpdate(s));
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [desktop]);
+
+  const handleCheckUpdates = useCallback(() => {
+    if (!desktop) return;
+    setUpdate({ state: 'checking' });
+    void desktop.checkForUpdates().then((r) => {
+      if (!r.ok) setUpdate({ state: 'error', message: r.reason ?? 'updates unavailable' });
+    });
+  }, [desktop]);
 
   // Apply the active theme class to <html>; keeps the loading screen themed too.
   useEffect(() => {
@@ -691,6 +719,10 @@ export function App() {
             onChangeTarget={changeTarget}
             onExportBackup={handleExportBackup}
             onImportBackup={handleImportBackup}
+            isDesktop={!!desktop}
+            appVersion={appVersion}
+            update={update}
+            onCheckUpdates={handleCheckUpdates}
           />
         )}
       </div>
@@ -1280,6 +1312,10 @@ function Settings(props: {
   onChangeTarget: (id: string, value: number) => void;
   onExportBackup: () => void;
   onImportBackup: (file: File) => void;
+  isDesktop: boolean;
+  appVersion: string | null;
+  update: UpdateStatus | null;
+  onCheckUpdates: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   return (
@@ -1370,9 +1406,47 @@ function Settings(props: {
             Local-only. No account, no telemetry, no network access. Stored in a private SQLite file on this device.
           </p>
         </div>
+
+        {props.isDesktop && (
+          <div className="card">
+            <h3>App updates</h3>
+            <p className="small muted">
+              {props.appVersion ? `hypertroph+ ${props.appVersion}. ` : ''}
+              Updates download automatically and install the next time you quit. You can also check now.
+            </p>
+            <div className="nav" style={{ marginTop: 10 }}>
+              <button
+                onClick={props.onCheckUpdates}
+                disabled={props.update?.state === 'checking' || props.update?.state === 'downloading'}
+              >
+                {props.update?.state === 'checking' ? 'Checking…' : 'Check for updates'}
+              </button>
+            </div>
+            {props.update && <p className="small muted" style={{ marginTop: 8 }}>{describeUpdate(props.update)}</p>}
+          </div>
+        )}
       </div>
     </>
   );
+}
+
+function describeUpdate(u: UpdateStatus): string {
+  switch (u.state) {
+    case 'checking':
+      return 'Checking for updates…';
+    case 'available':
+      return `Update ${u.version} found — downloading…`;
+    case 'downloading':
+      return `Downloading update… ${u.percent}%`;
+    case 'downloaded':
+      return `Update ${u.version} ready — it will install when you quit.`;
+    case 'not-available':
+      return 'You’re on the latest version.';
+    case 'error':
+      return `Update check failed: ${u.message}`;
+    default:
+      return '';
+  }
 }
 
 // ── Log dialog ──────────────────────────────────────────────
