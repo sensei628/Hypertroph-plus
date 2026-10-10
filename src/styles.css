@@ -726,3 +726,199 @@ h2 {
   border-top: 1px solid var(--border);
 }
 
+/* ── Mobile / PWA ─────────────────────────────────────────── */
+/* Bottom tab bar is a mobile-only affordance; hidden on desktop. */
+.tabbar {
+  display: none;
+}
+
+.col-span-2 {
+  grid-column: span 2;
+}
+
+@media (max-width: 720px) {
+  .app {
+    grid-template-rows: auto 1fr auto;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overscroll-behavior-y: none;
+  }
+
+  .topbar {
+    gap: 8px;
+    padding: env(safe-area-inset-top) 12px 0;
+    min-height: 52px;
+    position: sticky;
+    top: 0;
+    z-index: 6;
+  }
+
+  .brand {
+    font-size: 18px;
+  }
+
+  /* The bottom tab bar covers section switching; group-1 top buttons are dead weight. */
+  .segment-bar {
+    display: none;
+  }
+
+  .topbar-settings {
+    display: none;
+  }
+
+  .kbd {
+    display: none;
+  }
+
+  .content {
+    padding: 14px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .col-span-2 {
+    grid-column: auto;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .row {
+    flex-wrap: wrap;
+  }
+
+  /* Comfortable touch targets everywhere. */
+  button {
+    min-height: 40px;
+  }
+
+  button.small {
+    min-height: 32px;
+  }
+
+  /* 16px inputs stop iOS Safari from zooming on focus. */
+  input,
+  select {
+    font-size: 16px;
+    min-height: 40px;
+  }
+
+  .set-row {
+    grid-template-columns: 30px 1fr 1fr 1fr 48px;
+    gap: 6px;
+  }
+
+  .set-row input {
+    width: 100%;
+    min-width: 0;
+    text-align: center;
+  }
+
+  /* Command palette becomes a bottom sheet. */
+  .palette-overlay {
+    align-items: flex-end;
+    padding-top: 0;
+  }
+
+  .palette {
+    width: 100%;
+    max-width: 100%;
+    max-height: 90vh;
+    border-radius: 18px 18px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .palette.builder {
+    width: 100%;
+    max-height: 94vh;
+  }
+
+  .palette input {
+    font-size: 16px;
+    padding: 15px 16px;
+  }
+
+  .palette .result {
+    padding: 14px 16px;
+  }
+
+  .palette-tab,
+  .segment,
+  .chip {
+    min-height: 36px;
+  }
+
+  .facet-bar {
+    max-height: 34vh;
+  }
+
+  .toast {
+    left: 12px;
+    right: 12px;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    text-align: center;
+  }
+
+  /* Bottom navigation */
+  .tabbar {
+    display: flex;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+    z-index: 6;
+  }
+
+  .tabbar button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 56px;
+    border: none;
+    background: transparent;
+    border-radius: 0;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .tabbar button.active {
+    color: var(--accent-text);
+  }
+
+  .tabbar button .dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0;
+  }
+
+  .tabbar button.active .dot {
+    opacity: 1;
+  }
+}
+
+/* Respect the notch on landscape too. */
+@supports (padding: max(0px)) {
+  @media (max-width: 720px) {
+    .topbar {
+      padding-left: max(12px, env(safe-area-inset-left));
+      padding-right: max(12px, env(safe-area-inset-right));
+    }
+  }
+}
+
+

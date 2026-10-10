@@ -189,6 +189,8 @@ export function App() {
   // Apply the active theme class to <html>; keeps the loading screen themed too.
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#16130d' : '#fffdec');
   }, [theme]);
 
   function toggleTheme() {
@@ -559,7 +561,7 @@ export function App() {
         >
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>
-        <button className={section === 'settings' ? 'active' : ''} onClick={() => go('settings')}>
+        <button className={`topbar-settings ${section === 'settings' ? 'active' : ''}`} onClick={() => go('settings')}>
           Settings
         </button>
       </div>
@@ -645,6 +647,36 @@ export function App() {
           />
         )}
       </div>
+
+      <nav className="tabbar" role="tablist" aria-label="Sections">
+        <button
+          role="tab"
+          aria-selected={section === 'nutrition'}
+          className={section === 'nutrition' ? 'active' : ''}
+          onClick={() => go('nutrition')}
+        >
+          <span className="dot" />
+          Nutrition
+        </button>
+        <button
+          role="tab"
+          aria-selected={section === 'training'}
+          className={section === 'training' ? 'active' : ''}
+          onClick={() => go('training')}
+        >
+          <span className="dot" />
+          Training
+        </button>
+        <button
+          role="tab"
+          aria-selected={section === 'settings'}
+          className={section === 'settings' ? 'active' : ''}
+          onClick={() => go('settings')}
+        >
+          <span className="dot" />
+          Settings
+        </button>
+      </nav>
 
       {palette && (
         <CommandPalette
@@ -743,7 +775,7 @@ function NutritionSection(props: {
       </div>
 
       <div className="grid" style={{ marginTop: 12 }}>
-        <div className="card" style={{ gridColumn: 'span 2' }}>
+        <div className="card col-span-2">
           <h3>Today's meals</h3>
           {props.meals.map((meal, i) => {
             const items = props.items.filter((it) => it.mealSection === meal);
