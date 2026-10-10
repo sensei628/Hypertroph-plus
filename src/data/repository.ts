@@ -225,15 +225,63 @@ export interface WorkoutExerciseRow {
   exerciseId: string;
   name: string;
   unilateral: boolean;
+  targetSets: number | null;
+  targetReps: string | null;
+  targetRir: number | null;
   sets: SetRow[];
 }
 
 export interface WorkoutRow {
   id: string;
   name: string;
+  routineId: string | null;
   startedAt: number;
   endedAt: number | null;
   exercises: WorkoutExerciseRow[];
+}
+
+/** A user-authored workout-plan template ("Your workout plan"). */
+export interface RoutineExerciseRow {
+  id: string;
+  exerciseId: string;
+  name: string;
+  targetSets: number | null;
+  targetReps: string | null;
+  targetRir: number | null;
+  restSec: number | null;
+  seq: number;
+}
+
+export interface RoutineSummary {
+  id: string;
+  name: string;
+  notes: string | null;
+  exerciseCount: number;
+  updatedAt: number;
+}
+
+export interface RoutineDetail extends RoutineSummary {
+  exercises: RoutineExerciseRow[];
+}
+
+export interface RoutineInput {
+  id?: string;
+  name: string;
+  notes?: string | null;
+  exercises: {
+    exerciseId: string;
+    targetSets?: number | null;
+    targetReps?: string | null;
+    targetRir?: number | null;
+    restSec?: number | null;
+  }[];
+}
+
+/** The most recently logged set for an exercise, used to prefill the next one. */
+export interface LastSetHint {
+  loadG: number | null;
+  reps: number | null;
+  rir: number | null;
 }
 
 export interface DataPort {
@@ -285,6 +333,13 @@ export interface DataPort {
   logSet(workoutExerciseId: string, input: LogSetInput): { setId: string; prs: PRKind[] };
   finishWorkout(workoutId: string): void;
   getWeeklyVolume(fromDate: string, toDate: string, secondaryFactor?: number): Map<string, number>;
+
+  listRoutines(): RoutineSummary[];
+  getRoutine(id: string): RoutineDetail | null;
+  saveRoutine(input: RoutineInput): string;
+  deleteRoutine(id: string): void;
+  startWorkoutFromRoutine(routineId: string, localDate: string, tzOffsetMin?: number): string | null;
+  getLastSetForExercise(exerciseId: string): LastSetHint | null;
 }
 
 export class SqliteRepository implements DataPort {
@@ -1028,8 +1083,8 @@ export class SqliteRepository implements DataPort {
   }
 
   getActiveWorkout(localDate: string): WorkoutRow | null {
-    const row = this.rows<{ id: string; name: string; started_at: number; ended_at: number | null }>(
-      'SELECT id, name, started_at, ended_at FROM workouts WHERE local_date = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1',
+    const row = this.rows<{ id: string; name: string; routine_id: string | null; started_at: number; ended_at: number | null }>(
+      'SELECT id, name, routine_id, started_at, ended_at FROM workouts WHERE local_date = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1',
       [localDate],
     )[0];
     return row ? this.buildWorkout(row) : null;
@@ -1109,6 +1164,151 @@ export class SqliteRepository implements DataPort {
     this.commit();
   }
 
+  // ── workout-plan templates (routines) ────────────────────
+  listRoutines(): RoutineSummary[] {
+    return this.rows<{ id: string; name: string; notes: string | null; updated_at: number; n: number }>(
+      `SELECT r.id, r.name, r.notes, r.updated_at, COUNT(re.id) AS n
+       FROM routines r LEFT JOIN routine_exercises re ON re.routine_id = r.id
+       WHERE r.is_deleted = 0
+       GROUP BY r.id ORDER BY r.updated_at DESC`,
+    ).map((r) => ({ id: r.id, name: r.name, notes: r.notes, exerciseCount: r.n, updatedAt: r.updated_at }));
+  }
+
+  getRoutine(id: string): RoutineDetail | null {
+    const row = this.rows<{ id: string; name: string; notes: string | null; updated_at: number }>(
+      'SELECT id, name, notes, updated_at FROM routines WHERE id = ? AND is_deleted = 0',
+      [id],
+    )[0];
+    if (!row) return null;
+    const exercises = this.rows<{
+      id: string;
+      exercise_id: string;
+      canonical_name: string;
+      target_sets: number | null;
+      target_reps: string | null;
+      target_rir: number | null;
+      rest_sec: number | null;
+      seq: number;
+    }>(
+      `SELECT re.id, re.exercise_id, e.canonical_name, re.target_sets, re.target_reps, re.target_rir, re.rest_sec, re.seq
+       FROM routine_exercises re JOIN exercises e ON e.id = re.exercise_id
+       WHERE re.routine_id = ? ORDER BY re.seq`,
+      [id],
+    ).map((r) => ({
+      id: r.id,
+      exerciseId: r.exercise_id,
+      name: r.canonical_name,
+      targetSets: r.target_sets,
+      targetReps: r.target_reps,
+      targetRir: r.target_rir,
+      restSec: r.rest_sec,
+      seq: r.seq,
+    }));
+    return {
+      id: row.id,
+      name: row.name,
+      notes: row.notes,
+      exerciseCount: exercises.length,
+      updatedAt: row.updated_at,
+      exercises,
+    };
+  }
+
+  saveRoutine(input: RoutineInput): string {
+    const id = input.id ?? `rt_${uid()}`;
+    const now = Date.now();
+    this.db.run('BEGIN');
+    try {
+      const exists = this.rows<{ id: string }>('SELECT id FROM routines WHERE id = ?', [id])[0];
+      if (exists) {
+        this.run('UPDATE routines SET name = ?, notes = ?, updated_at = ?, is_deleted = 0 WHERE id = ?', [
+          input.name,
+          input.notes ?? null,
+          now,
+          id,
+        ]);
+        this.run('DELETE FROM routine_exercises WHERE routine_id = ?', [id]);
+      } else {
+        this.run(
+          'INSERT INTO routines (id, name, notes, created_at, updated_at, is_deleted) VALUES (?, ?, ?, ?, ?, 0)',
+          [id, input.name, input.notes ?? null, now, now],
+        );
+      }
+      input.exercises.forEach((ex, i) => {
+        this.run(
+          `INSERT INTO routine_exercises (id, routine_id, exercise_id, target_sets, target_reps, target_rir, rest_sec, seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            `rte_${uid()}`,
+            id,
+            ex.exerciseId,
+            ex.targetSets ?? null,
+            ex.targetReps ?? null,
+            ex.targetRir ?? null,
+            ex.restSec ?? null,
+            i,
+          ],
+        );
+      });
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+    return id;
+  }
+
+  deleteRoutine(id: string): void {
+    this.run('UPDATE routines SET is_deleted = 1, updated_at = ? WHERE id = ?', [Date.now(), id]);
+    this.commit();
+  }
+
+  startWorkoutFromRoutine(routineId: string, localDate: string, tzOffsetMin = 0): string | null {
+    const routine = this.getRoutine(routineId);
+    if (!routine) return null;
+    const id = `wo_${uid()}`;
+    const now = Date.now();
+    this.db.run('BEGIN');
+    try {
+      this.run(
+        'INSERT INTO workouts (id, routine_id, name, started_at, local_date, tz_offset_min, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [id, routine.id, routine.name, now, localDate, tzOffsetMin, now],
+      );
+      routine.exercises.forEach((ex, i) => {
+        this.run(
+          `INSERT INTO workout_exercises (id, workout_id, exercise_id, seq, target_sets, target_reps, target_rir)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [`we_${uid()}`, id, ex.exerciseId, i, ex.targetSets, ex.targetReps, ex.targetRir],
+        );
+        // Inline recents upsert (touchUse() persists and would break the txn).
+        this.run(
+          `INSERT INTO recent_uses (entity_type, entity_id, last_used_at) VALUES ('exercise', ?, ?)
+           ON CONFLICT(entity_type, entity_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
+          [ex.exerciseId, now],
+        );
+      });
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+    return id;
+  }
+
+  /** Most recent completed working set for an exercise (prefill convenience). */
+  getLastSetForExercise(exerciseId: string): LastSetHint | null {
+    const r = this.rows<{ load_g: number | null; reps: number | null; rir: number | null }>(
+      `SELECT s.load_g, s.reps, s.rir
+       FROM sets s JOIN workout_exercises we ON we.id = s.workout_exercise_id
+       WHERE we.exercise_id = ? AND s.is_completed = 1 AND s.set_type IN ('working','failure','amrap')
+       ORDER BY s.created_at DESC, s.set_index DESC LIMIT 1`,
+      [exerciseId],
+    )[0];
+    return r ? { loadG: r.load_g, reps: r.reps, rir: r.rir } : null;
+  }
+
   getWeeklyVolume(fromDate: string, toDate: string, secondaryFactor = 0.5): Map<string, number> {
     const rows = this.rows<{
       reps: number | null;
@@ -1150,9 +1350,23 @@ export class SqliteRepository implements DataPort {
   }
 
   // ── helpers ──────────────────────────────────────────────
-  private buildWorkout(row: { id: string; name: string; started_at: number; ended_at: number | null }): WorkoutRow {
-    const exercises = this.rows<{ id: string; exercise_id: string; canonical_name: string; unilateral: number }>(
-      `SELECT we.id, we.exercise_id, e.canonical_name, e.unilateral
+  private buildWorkout(row: {
+    id: string;
+    name: string;
+    routine_id: string | null;
+    started_at: number;
+    ended_at: number | null;
+  }): WorkoutRow {
+    const exercises = this.rows<{
+      id: string;
+      exercise_id: string;
+      canonical_name: string;
+      unilateral: number;
+      target_sets: number | null;
+      target_reps: string | null;
+      target_rir: number | null;
+    }>(
+      `SELECT we.id, we.exercise_id, e.canonical_name, e.unilateral, we.target_sets, we.target_reps, we.target_rir
        FROM workout_exercises we JOIN exercises e ON e.id = we.exercise_id
        WHERE we.workout_id = ? ORDER BY we.seq`,
       [row.id],
@@ -1161,6 +1375,9 @@ export class SqliteRepository implements DataPort {
       exerciseId: we.exercise_id,
       name: we.canonical_name,
       unilateral: we.unilateral === 1,
+      targetSets: we.target_sets,
+      targetReps: we.target_reps,
+      targetRir: we.target_rir,
       sets: this.rows<{ id: string; set_index: number; set_type: SetRecord['setType']; reps: number | null; load_g: number | null; rir: number | null; is_completed: number }>(
         'SELECT id, set_index, set_type, reps, load_g, rir, is_completed FROM sets WHERE workout_exercise_id = ? ORDER BY set_index',
         [we.id],
@@ -1174,7 +1391,14 @@ export class SqliteRepository implements DataPort {
         isCompleted: s.is_completed === 1,
       })),
     }));
-    return { id: row.id, name: row.name, startedAt: row.started_at, endedAt: row.ended_at, exercises };
+    return {
+      id: row.id,
+      name: row.name,
+      routineId: row.routine_id,
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+      exercises,
+    };
   }
 
   private currentPRState(exerciseId: string): PRState {

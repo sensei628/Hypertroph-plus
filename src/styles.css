@@ -191,6 +191,12 @@ select {
   padding: 1px 5px;
 }
 
+button.primary .kbd {
+  color: inherit;
+  border-color: rgba(56, 56, 56, 0.5);
+  background: rgba(56, 56, 56, 0.12);
+}
+
 .content {
   overflow: auto;
   padding: 20px;
@@ -627,3 +633,96 @@ h2 {
   flex: 0 0 70px;
   color: var(--muted);
 }
+
+/* Workout plans */
+.plan-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-card h3 {
+  margin: 0;
+}
+
+.target-hint {
+  margin: 2px 0 8px;
+}
+
+/* Plan builder dialog */
+.palette-overlay.builder-overlay {
+  z-index: 9;
+}
+
+.palette.builder {
+  width: min(640px, 94vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.builder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.builder-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+
+.builder-name {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.builder-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+}
+
+.builder-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.builder-row-head > span {
+  font-weight: 600;
+}
+
+.builder-targets {
+  display: flex;
+  gap: 10px;
+}
+
+.builder-targets label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.builder-targets input {
+  width: 100%;
+}
+
+.builder-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+

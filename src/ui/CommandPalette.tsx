@@ -23,6 +23,7 @@ type SortMode = 'name' | 'recent' | 'favorite';
 
 interface Props {
   initialMode: PickType;
+  tabs?: Tab[];
   searchFoods: (q: string, limit: number, filters?: FoodFilters) => FoodSummary[];
   countFoods: (q: string, filters?: FoodFilters) => number;
   getFoodFacets: (q: string) => FoodFacets;
@@ -117,6 +118,7 @@ function FacetBar(props: {
 
 export function CommandPalette({
   initialMode,
+  tabs,
   searchFoods,
   countFoods,
   getFoodFacets,
@@ -137,7 +139,8 @@ export function CommandPalette({
   onPickExercise,
   onClose,
 }: Props) {
-  const [tab, setTab] = useState<Tab>(initialMode);
+  const visibleTabs = tabs && tabs.length > 0 ? tabs : (['food', 'exercise', 'metrics'] as Tab[]);
+  const [tab, setTab] = useState<Tab>(visibleTabs.includes(initialMode) ? initialMode : visibleTabs[0]);
   const [query, setQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('name');
   const [foodFilter, setFoodFilter] = useState<FoodFilters>({});
@@ -324,15 +327,21 @@ export function CommandPalette({
     <div className="palette-overlay" onMouseDown={onClose}>
       <div className="palette" onMouseDown={(e) => e.stopPropagation()}>
         <div className="palette-tabs" role="tablist" aria-label="Palette sections">
-          <button role="tab" aria-selected={tab === 'food'} className={`palette-tab ${tab === 'food' ? 'active' : ''}`} onClick={() => setTab('food')}>
-            Food
-          </button>
-          <button role="tab" aria-selected={tab === 'exercise'} className={`palette-tab ${tab === 'exercise' ? 'active' : ''}`} onClick={() => setTab('exercise')}>
-            Exercises
-          </button>
-          <button role="tab" aria-selected={tab === 'metrics'} className={`palette-tab ${tab === 'metrics' ? 'active' : ''}`} onClick={() => setTab('metrics')}>
-            Body Metrics
-          </button>
+          {visibleTabs.includes('food') && (
+            <button role="tab" aria-selected={tab === 'food'} className={`palette-tab ${tab === 'food' ? 'active' : ''}`} onClick={() => setTab('food')}>
+              Food
+            </button>
+          )}
+          {visibleTabs.includes('exercise') && (
+            <button role="tab" aria-selected={tab === 'exercise'} className={`palette-tab ${tab === 'exercise' ? 'active' : ''}`} onClick={() => setTab('exercise')}>
+              Exercises
+            </button>
+          )}
+          {visibleTabs.includes('metrics') && (
+            <button role="tab" aria-selected={tab === 'metrics'} className={`palette-tab ${tab === 'metrics' ? 'active' : ''}`} onClick={() => setTab('metrics')}>
+              Body Metrics
+            </button>
+          )}
         </div>
 
         {tab === 'metrics' ? (

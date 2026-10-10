@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS routine_exercises (
   rest_sec    INTEGER,
   seq         INTEGER NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_routine_exercises ON routine_exercises(routine_id, seq);
 
 CREATE TABLE IF NOT EXISTS workouts (
   id            TEXT PRIMARY KEY,
@@ -245,7 +246,10 @@ CREATE TABLE IF NOT EXISTS workout_exercises (
   workout_id  TEXT NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
   exercise_id TEXT NOT NULL REFERENCES exercises(id),
   seq         INTEGER NOT NULL DEFAULT 0,
-  notes       TEXT
+  notes       TEXT,
+  target_sets INTEGER,
+  target_reps TEXT,
+  target_rir  INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_we_workout ON workout_exercises(workout_id);
 

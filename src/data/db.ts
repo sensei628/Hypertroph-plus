@@ -223,6 +223,51 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
         ('e_ohp','vertical_push'),('e_pullup','vertical_pull'),('e_row','horizontal_pull');
     `,
   },
+  {
+    // User workout-plan templates. The `routines`/`routine_exercises` tables are
+    // part of the base schema; this migration guarantees they exist on older
+    // persisted databases and adds the per-exercise target prescription columns
+    // to `workout_exercises` so a workout started from a plan can carry its
+    // targets. Rebuild keeps existing workout/set history verbatim.
+    version: 7,
+    sql: `
+      CREATE TABLE IF NOT EXISTS routines (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        notes      TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1))
+      );
+      CREATE TABLE IF NOT EXISTS routine_exercises (
+        id          TEXT PRIMARY KEY,
+        routine_id  TEXT NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+        exercise_id TEXT NOT NULL REFERENCES exercises(id),
+        target_sets INTEGER,
+        target_reps TEXT,
+        target_rir  INTEGER,
+        rest_sec    INTEGER,
+        seq         INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_routine_exercises ON routine_exercises(routine_id, seq);
+
+      CREATE TABLE workout_exercises_new (
+        id          TEXT PRIMARY KEY,
+        workout_id  TEXT NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+        exercise_id TEXT NOT NULL REFERENCES exercises(id),
+        seq         INTEGER NOT NULL DEFAULT 0,
+        notes       TEXT,
+        target_sets INTEGER,
+        target_reps TEXT,
+        target_rir  INTEGER
+      );
+      INSERT INTO workout_exercises_new (id, workout_id, exercise_id, seq, notes)
+        SELECT id, workout_id, exercise_id, seq, notes FROM workout_exercises;
+      DROP TABLE workout_exercises;
+      ALTER TABLE workout_exercises_new RENAME TO workout_exercises;
+      CREATE INDEX IF NOT EXISTS idx_we_workout ON workout_exercises(workout_id);
+    `,
+  },
 ];
 
 function applyMigrations(db: DB): boolean {

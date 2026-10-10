@@ -10,7 +10,9 @@ import {
   type FoodDetail,
   type FoodFilters,
   type FoodSummary,
+  type LastSetHint,
   type NutrientDef,
+  type RoutineSummary,
   type WorkoutExerciseRow,
   type WorkoutRow,
 } from '../data/repository';
@@ -21,6 +23,19 @@ import { CommandPalette } from './CommandPalette';
 
 type Section = 'nutrition' | 'training' | 'settings';
 type PaletteMode = 'food' | 'exercise';
+type TrainingMode = 'random' | 'plan';
+interface BuilderExercise {
+  exerciseId: string;
+  name: string;
+  targetSets: string;
+  targetReps: string;
+  targetRir: string;
+}
+interface BuilderState {
+  id: string | null;
+  name: string;
+  exercises: BuilderExercise[];
+}
 const DEFAULT_MEALS = ['breakfast', 'lunch', 'dinner'] as const;
 const SUMMARY_NUTRIENTS = ['energy_kcal', 'protein_g', 'carb_g', 'fat_g'];
 
@@ -105,8 +120,12 @@ export function App() {
   const [pendingMeal, setPendingMeal] = useState<string | undefined>(undefined);
   const [activeWorkout, setActiveWorkout] = useState<WorkoutRow | null>(null);
   const [weeklyVolume, setWeeklyVolume] = useState<Map<string, number>>(new Map());
+  const [routines, setRoutines] = useState<RoutineSummary[]>([]);
+  const [trainingMode, setTrainingMode] = useState<TrainingMode>('random');
+  const [builder, setBuilder] = useState<BuilderState | null>(null);
 
   const [palette, setPalette] = useState<PaletteMode | null>(null);
+  const [palettePurpose, setPalettePurpose] = useState<'log' | 'builder'>('log');
   const [logTarget, setLogTarget] = useState<FoodDetail | null>(null);
   const [logMealDefault, setLogMealDefault] = useState<string>(DEFAULT_MEALS[0]);
   const [customOpen, setCustomOpen] = useState(false);
@@ -127,6 +146,8 @@ export function App() {
         setSecondaryFactor(Number(r.getPreference('secondaryVolumeFactor', '0.5')));
         setMuscleNames(r.getMuscleNames());
         setMeals(buildMeals(r));
+        setRoutines(r.listRoutines());
+        setTrainingMode(r.getPreference('training.mode', 'random') === 'plan' ? 'plan' : 'random');
         setPinnedFoods(r.getPinnedFoods());
         setPinnedExercises(r.getPinnedExercises());
         const savedTheme = r.getPreference('theme', 'dark') === 'dark' ? 'dark' : 'light';
@@ -150,6 +171,7 @@ export function App() {
     setFavoriteFoodIds([...repo.favoriteIds('food')]);
     setFavoriteExerciseIds([...repo.favoriteIds('exercise')]);
     setActiveWorkout(repo.getActiveWorkout(date));
+    setRoutines(repo.listRoutines());
     const [ws, we] = weekRange(date);
     setWeeklyVolume(repo.getWeeklyVolume(ws, we, secondaryFactor));
   }, [repo, date, secondaryFactor]);
@@ -181,6 +203,7 @@ export function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         if (section !== 'nutrition' && section !== 'training') return;
         e.preventDefault();
+        setPalettePurpose('log');
         setPalette(section === 'nutrition' ? 'food' : 'exercise');
       }
     }
@@ -202,6 +225,7 @@ export function App() {
   const countExercises = useCallback((q: string, filters?: ExerciseFilters) => repo?.countExercises(q, filters) ?? 0, [repo]);
   const getFood = useCallback((id: string) => repo?.getFood(id) ?? null, [repo]);
   const getExercise = useCallback((id: string) => repo?.getExercise(id) ?? null, [repo]);
+  const getLastSet = useCallback((id: string): LastSetHint | null => repo?.getLastSetForExercise(id) ?? null, [repo]);
   const getFoodFacets = useCallback(
     (q: string) => repo?.getFoodFacets(q) ?? { foodTypes: [], entryTypes: [], prepStates: [] },
     [repo],
@@ -218,7 +242,13 @@ export function App() {
 
   function openFoodPalette(meal?: string) {
     setPendingMeal(meal);
+    setPalettePurpose('log');
     setPalette('food');
+  }
+
+  function openExercisePalette() {
+    setPalettePurpose('log');
+    setPalette('exercise');
   }
 
   function openLog(food: FoodSummary, meal?: string) {
@@ -235,6 +265,7 @@ export function App() {
   function closePalette() {
     setPendingMeal(undefined);
     setPalette(null);
+    setPalettePurpose('log');
   }
 
   function addMeal() {
@@ -302,6 +333,121 @@ export function App() {
     if (!repo) return;
     repo.startWorkout('Workout', date, -new Date().getTimezoneOffset());
     refresh();
+  }
+
+  function changeTrainingMode(mode: TrainingMode) {
+    setTrainingMode(mode);
+    repo?.setPreference('training.mode', mode);
+  }
+
+  function startRoutine(routineId: string) {
+    if (!repo) return;
+    const id = repo.startWorkoutFromRoutine(routineId, date, -new Date().getTimezoneOffset());
+    if (id) {
+      refresh();
+      setToast('Workout started from plan');
+    }
+  }
+
+  function newPlan() {
+    setBuilder({ id: null, name: '', exercises: [] });
+  }
+
+  function editPlan(id: string) {
+    const r = repo?.getRoutine(id);
+    if (!r) return;
+    setBuilder({
+      id: r.id,
+      name: r.name,
+      exercises: r.exercises.map((e) => ({
+        exerciseId: e.exerciseId,
+        name: e.name,
+        targetSets: e.targetSets != null ? String(e.targetSets) : '',
+        targetReps: e.targetReps ?? '',
+        targetRir: e.targetRir != null ? String(e.targetRir) : '',
+      })),
+    });
+  }
+
+  function deletePlan(id: string) {
+    if (!repo) return;
+    if (!window.confirm('Delete this workout plan?')) return;
+    repo.deleteRoutine(id);
+    refresh();
+    setToast('Plan deleted');
+  }
+
+  function openBuilderPicker() {
+    setPalettePurpose('builder');
+    setPalette('exercise');
+  }
+
+  function addExerciseToBuilder(ex: ExerciseSummary) {
+    setBuilder((prev) =>
+      prev
+        ? {
+            ...prev,
+            exercises: [
+              ...prev.exercises,
+              { exerciseId: ex.id, name: ex.name, targetSets: '3', targetReps: '', targetRir: '2' },
+            ],
+          }
+        : prev,
+    );
+    setPalette(null);
+    setPalettePurpose('log');
+  }
+
+  function updateBuilderExercise(index: number, patch: Partial<BuilderExercise>) {
+    setBuilder((prev) =>
+      prev ? { ...prev, exercises: prev.exercises.map((e, i) => (i === index ? { ...e, ...patch } : e)) } : prev,
+    );
+  }
+
+  function moveBuilderExercise(index: number, dir: -1 | 1) {
+    setBuilder((prev) => {
+      if (!prev) return prev;
+      const next = [...prev.exercises];
+      const j = index + dir;
+      if (j < 0 || j >= next.length) return prev;
+      [next[index], next[j]] = [next[j], next[index]];
+      return { ...prev, exercises: next };
+    });
+  }
+
+  function removeBuilderExercise(index: number) {
+    setBuilder((prev) => (prev ? { ...prev, exercises: prev.exercises.filter((_, i) => i !== index) } : prev));
+  }
+
+  function saveBuilder() {
+    if (!repo || !builder) return;
+    const name = builder.name.trim();
+    if (!name) {
+      setToast('Name your plan first');
+      return;
+    }
+    if (builder.exercises.length === 0) {
+      setToast('Add at least one exercise');
+      return;
+    }
+    repo.saveRoutine({
+      id: builder.id ?? undefined,
+      name,
+      exercises: builder.exercises.map((e) => ({
+        exerciseId: e.exerciseId,
+        targetSets: e.targetSets ? Number(e.targetSets) : null,
+        targetReps: e.targetReps.trim() || null,
+        targetRir: e.targetRir ? Number(e.targetRir) : null,
+      })),
+    });
+    setBuilder(null);
+    refresh();
+    setToast('Plan saved');
+  }
+
+  function pickExercise(ex: ExerciseSummary) {
+    if (palettePurpose === 'builder') addExerciseToBuilder(ex);
+    else openExerciseInWorkout(ex);
   }
 
   function addSet(we: WorkoutExerciseRow, loadStr: string, repsStr: string, rirStr: string, setType: 'working' | 'warmup') {
@@ -401,7 +547,7 @@ export function App() {
           </button>
         )}
         {section === 'training' && (
-          <button className="primary" onClick={() => setPalette('exercise')}>
+          <button className="primary" onClick={openExercisePalette}>
             Add exercise <span className="kbd">Ctrl K</span>
           </button>
         )}
@@ -469,10 +615,18 @@ export function App() {
             weeklyVolume={weeklyVolume}
             muscleNames={muscleNames}
             secondaryFactor={secondaryFactor}
-            onStart={startWorkout}
-            onAddExercise={() => setPalette('exercise')}
+            routines={routines}
+            mode={trainingMode}
+            onModeChange={changeTrainingMode}
+            onStartRandom={startWorkout}
+            onStartRoutine={startRoutine}
+            onAddExercise={openExercisePalette}
             onAddSet={addSet}
             onFinish={finishWorkout}
+            onNewPlan={newPlan}
+            onEditPlan={editPlan}
+            onDeletePlan={deletePlan}
+            getLastSet={getLastSet}
           />
         )}
 
@@ -495,6 +649,7 @@ export function App() {
       {palette && (
         <CommandPalette
           initialMode={palette}
+          tabs={palettePurpose === 'builder' ? ['exercise'] : undefined}
           searchFoods={searchFoods}
           countFoods={countFoods}
           getFoodFacets={getFoodFacets}
@@ -512,8 +667,21 @@ export function App() {
           onToggleFavorite={toggleFavorite}
           onAddBodyMetric={addBodyMetric}
           onPickFood={openLog}
-          onPickExercise={openExerciseInWorkout}
+          onPickExercise={pickExercise}
           onClose={closePalette}
+        />
+      )}
+
+      {builder && (
+        <PlanBuilder
+          plan={builder}
+          onChangeName={(v) => setBuilder((prev) => (prev ? { ...prev, name: v } : prev))}
+          onAddExercise={openBuilderPicker}
+          onChangeExercise={updateBuilderExercise}
+          onRemoveExercise={removeBuilderExercise}
+          onMoveExercise={moveBuilderExercise}
+          onSave={saveBuilder}
+          onCancel={() => setBuilder(null)}
         />
       )}
 
@@ -697,10 +865,18 @@ function TrainingSection(props: {
   weeklyVolume: Map<string, number>;
   muscleNames: Map<string, string>;
   secondaryFactor: number;
-  onStart: () => void;
+  routines: RoutineSummary[];
+  mode: TrainingMode;
+  onModeChange: (m: TrainingMode) => void;
+  onStartRandom: () => void;
+  onStartRoutine: (id: string) => void;
   onAddExercise: () => void;
   onAddSet: (we: WorkoutExerciseRow, load: string, reps: string, rir: string, setType: 'working' | 'warmup') => void;
   onFinish: () => void;
+  onNewPlan: () => void;
+  onEditPlan: (id: string) => void;
+  onDeletePlan: (id: string) => void;
+  getLastSet: (exerciseId: string) => LastSetHint | null;
 }) {
   return (
     <>
@@ -719,21 +895,82 @@ function TrainingSection(props: {
       </div>
 
       {!props.activeWorkout ? (
-        <div className="card" style={{ marginTop: 12 }}>
-          <p className="muted">No active workout. Start one to log sets.</p>
-          <div className="nav" style={{ marginTop: 8 }}>
-            <button className="primary" onClick={props.onStart}>
-              Start workout
+        <>
+          <div className="segments" role="tablist" aria-label="Workout start mode" style={{ marginTop: 12 }}>
+            <button
+              role="tab"
+              aria-selected={props.mode === 'random'}
+              className={`segment ${props.mode === 'random' ? 'active' : ''}`}
+              onClick={() => props.onModeChange('random')}
+            >
+              Random
             </button>
-            <button className="ghost" onClick={props.onAddExercise}>
-              + Exercise
+            <button
+              role="tab"
+              aria-selected={props.mode === 'plan'}
+              className={`segment ${props.mode === 'plan' ? 'active' : ''}`}
+              onClick={() => props.onModeChange('plan')}
+            >
+              Your workout plan
             </button>
           </div>
-        </div>
+
+          {props.mode === 'random' ? (
+            <div className="card" style={{ marginTop: 12 }}>
+              <p className="muted">No active workout. Start one to log sets.</p>
+              <div className="nav" style={{ marginTop: 8 }}>
+                <button className="primary" onClick={props.onStartRandom}>
+                  Start workout
+                </button>
+                <button className="ghost" onClick={props.onAddExercise}>
+                  + Exercise
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 12 }}>
+              <div className="row" style={{ marginBottom: 8 }}>
+                <span className="muted small">Pick a saved plan to start, or build a new one.</span>
+                <button className="ghost" onClick={props.onNewPlan}>
+                  + New plan
+                </button>
+              </div>
+              {props.routines.length === 0 && (
+                <div className="card">
+                  <p className="muted">You don't have any workout plans yet. Create one to get started.</p>
+                </div>
+              )}
+              <div className="grid">
+                {props.routines.map((r) => (
+                  <div className="card plan-card" key={r.id}>
+                    <div className="row">
+                      <h3>{r.name}</h3>
+                      <span className="muted small">
+                        {r.exerciseCount} {r.exerciseCount === 1 ? 'exercise' : 'exercises'}
+                      </span>
+                    </div>
+                    {r.notes && <p className="muted small">{r.notes}</p>}
+                    <div className="nav" style={{ marginTop: 8 }}>
+                      <button className="primary" onClick={() => props.onStartRoutine(r.id)}>
+                        Start
+                      </button>
+                      <button className="ghost" onClick={() => props.onEditPlan(r.id)}>
+                        Edit
+                      </button>
+                      <button className="ghost danger" onClick={() => props.onDeletePlan(r.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <div className="grid" style={{ marginTop: 12 }}>
           {props.activeWorkout.exercises.map((we) => (
-            <ExerciseCard key={we.id} we={we} units={props.units} onAddSet={props.onAddSet} />
+            <ExerciseCard key={we.id} we={we} units={props.units} onAddSet={props.onAddSet} getLastSet={props.getLastSet} />
           ))}
           {props.activeWorkout.exercises.length === 0 && (
             <div className="card">
@@ -752,18 +989,45 @@ function ExerciseCard({
   we,
   units,
   onAddSet,
+  getLastSet,
 }: {
   we: WorkoutExerciseRow;
   units: 'kg' | 'lb';
   onAddSet: (we: WorkoutExerciseRow, load: string, reps: string, rir: string, setType: 'working' | 'warmup') => void;
+  getLastSet: (exerciseId: string) => LastSetHint | null;
 }) {
-  const [load, setLoad] = useState('');
-  const [reps, setReps] = useState('8');
-  const [rir, setRir] = useState('2');
+  // Prefill the first set from the exercise's most recent logged set, falling
+  // back to the plan's targets, so the user isn't retyping the same numbers.
+  const [load, setLoad] = useState(() => {
+    const h = getLastSet(we.exerciseId);
+    if (!h || h.loadG == null) return '';
+    const v = units === 'kg' ? gToKg(h.loadG) : gToLb(h.loadG);
+    return String(Math.round(v * 10) / 10);
+  });
+  const [reps, setReps] = useState(() => {
+    const h = getLastSet(we.exerciseId);
+    if (h && h.reps != null) return String(h.reps);
+    if (we.targetReps && /^\d+$/.test(we.targetReps.trim())) return we.targetReps.trim();
+    return '8';
+  });
+  const [rir, setRir] = useState(() => {
+    const h = getLastSet(we.exerciseId);
+    if (h && h.rir != null) return String(h.rir);
+    if (we.targetRir != null) return String(we.targetRir);
+    return '2';
+  });
+
+  const hasTarget = we.targetSets != null || we.targetReps != null || we.targetRir != null;
 
   return (
     <div className="card">
       <h3>{we.name}</h3>
+      {hasTarget && (
+        <p className="muted small target-hint">
+          Target: {we.targetSets ?? '—'} × {we.targetReps ?? '—'}
+          {we.targetRir != null ? ` @ RIR ${we.targetRir}` : ''}
+        </p>
+      )}
       <div className="set-row small muted">
         <span>Set</span>
         <span>Load ({units})</span>
@@ -785,25 +1049,117 @@ function ExerciseCard({
         <input value={load} onChange={(e) => setLoad(e.target.value)} placeholder={units} inputMode="decimal" />
         <input value={reps} onChange={(e) => setReps(e.target.value)} inputMode="numeric" />
         <input value={rir} onChange={(e) => setRir(e.target.value)} inputMode="numeric" />
-        <button
-          className="primary"
-          onClick={() => {
-            onAddSet(we, load, reps, rir, 'working');
-            setLoad('');
-          }}
-        >
+        <button className="primary" onClick={() => onAddSet(we, load, reps, rir, 'working')}>
           +
         </button>
       </div>
-      <button
-        className="ghost small"
-        onClick={() => {
-          onAddSet(we, load, reps, rir, 'warmup');
-          setLoad('');
-        }}
-      >
+      <button className="ghost small" onClick={() => onAddSet(we, load, reps, rir, 'warmup')}>
         + warm-up set
       </button>
+    </div>
+  );
+}
+
+// ── Plan builder ────────────────────────────────────────────
+function PlanBuilder(props: {
+  plan: BuilderState;
+  onChangeName: (v: string) => void;
+  onAddExercise: () => void;
+  onChangeExercise: (index: number, patch: Partial<BuilderExercise>) => void;
+  onRemoveExercise: (index: number) => void;
+  onMoveExercise: (index: number, dir: -1 | 1) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="palette-overlay builder-overlay" onMouseDown={props.onCancel}>
+      <div className="palette builder" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="builder-head">
+          <strong>{props.plan.id ? 'Edit workout plan' : 'New workout plan'}</strong>
+          <button className="ghost small" onClick={props.onCancel}>
+            Close
+          </button>
+        </div>
+        <div className="builder-body">
+          <label className="builder-name">
+            <span className="muted small">Plan name</span>
+            <input
+              value={props.plan.name}
+              placeholder="e.g. Push day"
+              onChange={(e) => props.onChangeName(e.target.value)}
+              autoFocus
+            />
+          </label>
+
+          {props.plan.exercises.length === 0 && (
+            <p className="muted small">No exercises yet. Add one to build your plan.</p>
+          )}
+
+          {props.plan.exercises.map((ex, i) => (
+            <div className="builder-row" key={`${ex.exerciseId}-${i}`}>
+              <div className="builder-row-head">
+                <span>{ex.name}</span>
+                <div className="nav">
+                  <button className="icon-btn small" title="Move up" onClick={() => props.onMoveExercise(i, -1)} disabled={i === 0}>
+                    ↑
+                  </button>
+                  <button
+                    className="icon-btn small"
+                    title="Move down"
+                    onClick={() => props.onMoveExercise(i, 1)}
+                    disabled={i === props.plan.exercises.length - 1}
+                  >
+                    ↓
+                  </button>
+                  <button className="ghost danger small" onClick={() => props.onRemoveExercise(i)}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <div className="builder-targets">
+                <label>
+                  <span className="muted small">Sets</span>
+                  <input
+                    value={ex.targetSets}
+                    inputMode="numeric"
+                    placeholder="3"
+                    onChange={(e) => props.onChangeExercise(i, { targetSets: e.target.value })}
+                  />
+                </label>
+                <label>
+                  <span className="muted small">Reps</span>
+                  <input
+                    value={ex.targetReps}
+                    placeholder="8-12"
+                    onChange={(e) => props.onChangeExercise(i, { targetReps: e.target.value })}
+                  />
+                </label>
+                <label>
+                  <span className="muted small">RIR</span>
+                  <input
+                    value={ex.targetRir}
+                    inputMode="numeric"
+                    placeholder="2"
+                    onChange={(e) => props.onChangeExercise(i, { targetRir: e.target.value })}
+                  />
+                </label>
+              </div>
+            </div>
+          ))}
+
+          <button className="ghost" onClick={props.onAddExercise}>
+            + Add exercise
+          </button>
+        </div>
+        <div className="builder-foot">
+          <button className="ghost" onClick={props.onCancel}>
+            Cancel
+          </button>
+          <button className="primary" onClick={props.onSave}>
+            Save plan
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

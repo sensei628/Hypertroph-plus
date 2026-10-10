@@ -256,3 +256,62 @@ describe('migration v6 (exercise taxonomy)', () => {
     expect(patterns).toContain('horizontal_push');
   });
 });
+
+// Pre-v7 training layout: workouts/workout_exercises without the per-exercise
+// target columns and without the plan (routines) tables.
+const PRE_V7_SCHEMA = `
+  CREATE TABLE exercises (id TEXT PRIMARY KEY, canonical_name TEXT NOT NULL);
+  CREATE TABLE workouts (
+    id TEXT PRIMARY KEY, routine_id TEXT, name TEXT NOT NULL,
+    started_at INTEGER NOT NULL, ended_at INTEGER, local_date TEXT NOT NULL,
+    tz_offset_min INTEGER, notes TEXT, created_at INTEGER NOT NULL
+  );
+  CREATE TABLE workout_exercises (
+    id TEXT PRIMARY KEY, workout_id TEXT NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    exercise_id TEXT NOT NULL REFERENCES exercises(id), seq INTEGER NOT NULL DEFAULT 0, notes TEXT
+  );
+  CREATE TABLE sets (
+    id TEXT PRIMARY KEY, workout_exercise_id TEXT NOT NULL REFERENCES workout_exercises(id) ON DELETE CASCADE,
+    set_index INTEGER NOT NULL
+  );
+`;
+
+describe('migration v7 (workout plans + per-exercise targets)', () => {
+  let d: Database;
+
+  beforeAll(async () => {
+    const SQL = await initSqlJs({
+      locateFile: (file) => path.join(path.dirname(require.resolve('sql.js')), file),
+    });
+    d = new SQL.Database();
+    d.run(PRE_V7_SCHEMA);
+    d.run("INSERT INTO exercises VALUES ('e_bench','Bench Press')");
+    d.run("INSERT INTO workouts VALUES ('wo1',NULL,'Push','2026-01-01',NULL,'2026-01-01',0,NULL,1)");
+    d.run("INSERT INTO workout_exercises VALUES ('we1','wo1','e_bench',0,'note')");
+    d.run("INSERT INTO sets VALUES ('set1','we1',1)");
+  });
+
+  it('adds target columns, preserves history, and creates the plan tables', () => {
+    const v7 = MIGRATIONS.find((m) => m.version === 7);
+    expect(v7).toBeTruthy();
+    d.run('BEGIN');
+    d.run('PRAGMA foreign_keys = OFF');
+    d.run(v7!.sql);
+    d.run('PRAGMA foreign_keys = ON');
+    d.run('COMMIT');
+
+    const cols = d.exec('PRAGMA table_info(workout_exercises)')[0].values.map((c) => c[1]);
+    expect(cols).toContain('target_sets');
+    expect(cols).toContain('target_reps');
+    expect(cols).toContain('target_rir');
+
+    // Existing workout_exercise + child set rows survived the rebuild.
+    expect(d.exec("SELECT seq, notes FROM workout_exercises WHERE id = 'we1'")[0].values[0]).toEqual([0, 'note']);
+    expect(d.exec("SELECT COUNT(*) FROM sets WHERE id = 'set1'")[0].values[0][0]).toBe(1);
+
+    const tables = d
+      .exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('routines','routine_exercises')")[0]
+      .values.map((r) => r[0]);
+    expect(tables.sort()).toEqual(['routine_exercises', 'routines']);
+  });
+});
