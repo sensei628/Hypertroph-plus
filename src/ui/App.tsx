@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import { loadDatabase, exportDatabaseBytes, flushPersistence, type DB } from '../data/db';
 import { loadRefDatabase } from '../data/refdb';
@@ -263,7 +263,7 @@ export function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', theme === 'dark' ? '#16130d' : '#fffdec');
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#0e1512' : '#f3f4f3');
   }, [theme]);
 
   function toggleTheme() {
@@ -611,151 +611,120 @@ export function App() {
 
   return (
     <div className="app">
-      <div className="topbar">
-        <div className="brand">
-          hypertroph<span>+</span>
-        </div>
-        <div className="spacer" />
-        {section === 'nutrition' && (
-          <button className="primary" onClick={() => openFoodPalette()}>
-            Log food <span className="kbd">Ctrl K</span>
-          </button>
-        )}
-        {section === 'training' && (
-          <button className="primary" onClick={openExercisePalette}>
-            Add exercise <span className="kbd">Ctrl K</span>
-          </button>
-        )}
-        <button
-          className="icon-btn"
-          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
-          onClick={toggleTheme}
-        >
-          {theme === 'dark' ? '☀️' : '🌙'}
-        </button>
-        <button className={`topbar-settings ${section === 'settings' ? 'active' : ''}`} onClick={() => go('settings')}>
-          Settings
-        </button>
-      </div>
+      <Sidebar
+        section={section}
+        onNavigate={go}
+        nutritionCount={dayItems.length}
+        trainingCount={activeWorkout?.exercises.length ?? 0}
+      />
 
-      <div className="segment-bar">
-        <div className="segments" role="tablist" aria-label="Sections">
+      <div className="main">
+        <Topbar
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onSearch={() => {
+            setPalettePurpose('log');
+            setPalette(section === 'training' ? 'exercise' : 'food');
+          }}
+        />
+
+        <div className="content">
+          {section === 'nutrition' && (
+            <NutritionSection
+              date={date}
+              setDate={setDate}
+              items={dayItems}
+              totals={totals}
+              targets={targets}
+              defById={defById}
+              recentFoods={recentFoods}
+              meals={meals}
+              onAddFood={openFoodPalette}
+              onPickRecent={openLog}
+              onDelete={(id) => {
+                repo.deleteLogItem(id);
+                refresh();
+              }}
+              onAddMeal={addMeal}
+              onRemoveMeal={removeMeal}
+              onCreateCustom={() => setCustomOpen(true)}
+            />
+          )}
+
+          {section === 'training' && (
+            <TrainingSection
+              activeWorkout={activeWorkout}
+              units={units}
+              weeklyVolume={weeklyVolume}
+              muscleNames={muscleNames}
+              secondaryFactor={secondaryFactor}
+              routines={routines}
+              mode={trainingMode}
+              onModeChange={changeTrainingMode}
+              onStartRandom={startWorkout}
+              onStartRoutine={startRoutine}
+              onAddExercise={openExercisePalette}
+              onAddSet={addSet}
+              onFinish={finishWorkout}
+              onNewPlan={newPlan}
+              onEditPlan={editPlan}
+              onDeletePlan={deletePlan}
+              getLastSet={getLastSet}
+            />
+          )}
+
+          {section === 'settings' && (
+            <Settings
+              units={units}
+              onChangeUnits={changeUnits}
+              secondaryFactor={secondaryFactor}
+              onChangeSecondary={(n) => {
+                setSecondaryFactor(n);
+                repo.setPreference('secondaryVolumeFactor', String(n));
+              }}
+              targets={targets}
+              defById={defById}
+              onChangeTarget={changeTarget}
+              onExportBackup={handleExportBackup}
+              onImportBackup={handleImportBackup}
+              isDesktop={!!desktop}
+              appVersion={appVersion}
+              update={update}
+              onCheckUpdates={handleCheckUpdates}
+            />
+          )}
+        </div>
+
+        <nav className="tabbar" role="tablist" aria-label="Sections">
           <button
             role="tab"
             aria-selected={section === 'nutrition'}
-            className={`segment ${section === 'nutrition' ? 'active' : ''}`}
+            className={section === 'nutrition' ? 'active' : ''}
             onClick={() => go('nutrition')}
           >
+            <Icon name="nutrition" />
             Nutrition
           </button>
           <button
             role="tab"
             aria-selected={section === 'training'}
-            className={`segment ${section === 'training' ? 'active' : ''}`}
+            className={section === 'training' ? 'active' : ''}
             onClick={() => go('training')}
           >
+            <Icon name="training" />
             Training
           </button>
-        </div>
+          <button
+            role="tab"
+            aria-selected={section === 'settings'}
+            className={section === 'settings' ? 'active' : ''}
+            onClick={() => go('settings')}
+          >
+            <Icon name="settings" />
+            Settings
+          </button>
+        </nav>
       </div>
-
-      <div className="content">
-        {section === 'nutrition' && (
-          <NutritionSection
-            date={date}
-            setDate={setDate}
-            items={dayItems}
-            totals={totals}
-            targets={targets}
-            defById={defById}
-            recentFoods={recentFoods}
-            meals={meals}
-            onAddFood={openFoodPalette}
-            onPickRecent={openLog}
-            onDelete={(id) => {
-              repo.deleteLogItem(id);
-              refresh();
-            }}
-            onAddMeal={addMeal}
-            onRemoveMeal={removeMeal}
-            onCreateCustom={() => setCustomOpen(true)}
-          />
-        )}
-
-        {section === 'training' && (
-          <TrainingSection
-            activeWorkout={activeWorkout}
-            units={units}
-            weeklyVolume={weeklyVolume}
-            muscleNames={muscleNames}
-            secondaryFactor={secondaryFactor}
-            routines={routines}
-            mode={trainingMode}
-            onModeChange={changeTrainingMode}
-            onStartRandom={startWorkout}
-            onStartRoutine={startRoutine}
-            onAddExercise={openExercisePalette}
-            onAddSet={addSet}
-            onFinish={finishWorkout}
-            onNewPlan={newPlan}
-            onEditPlan={editPlan}
-            onDeletePlan={deletePlan}
-            getLastSet={getLastSet}
-          />
-        )}
-
-        {section === 'settings' && (
-          <Settings
-            units={units}
-            onChangeUnits={changeUnits}
-            secondaryFactor={secondaryFactor}
-            onChangeSecondary={(n) => {
-              setSecondaryFactor(n);
-              repo.setPreference('secondaryVolumeFactor', String(n));
-            }}
-            targets={targets}
-            defById={defById}
-            onChangeTarget={changeTarget}
-            onExportBackup={handleExportBackup}
-            onImportBackup={handleImportBackup}
-            isDesktop={!!desktop}
-            appVersion={appVersion}
-            update={update}
-            onCheckUpdates={handleCheckUpdates}
-          />
-        )}
-      </div>
-
-      <nav className="tabbar" role="tablist" aria-label="Sections">
-        <button
-          role="tab"
-          aria-selected={section === 'nutrition'}
-          className={section === 'nutrition' ? 'active' : ''}
-          onClick={() => go('nutrition')}
-        >
-          <span className="dot" />
-          Nutrition
-        </button>
-        <button
-          role="tab"
-          aria-selected={section === 'training'}
-          className={section === 'training' ? 'active' : ''}
-          onClick={() => go('training')}
-        >
-          <span className="dot" />
-          Training
-        </button>
-        <button
-          role="tab"
-          aria-selected={section === 'settings'}
-          className={section === 'settings' ? 'active' : ''}
-          onClick={() => go('settings')}
-        >
-          <span className="dot" />
-          Settings
-        </button>
-      </nav>
 
       {palette && (
         <CommandPalette
@@ -815,6 +784,357 @@ export function App() {
   );
 }
 
+// ── Icons (inline SVG, no icon dependency) ──────────────────
+type IconName =
+  | 'bolt'
+  | 'nutrition'
+  | 'training'
+  | 'settings'
+  | 'search'
+  | 'sun'
+  | 'moon'
+  | 'arrow-up-right'
+  | 'plus'
+  | 'chevron-left'
+  | 'chevron-right'
+  | 'flame'
+  | 'trash'
+  | 'play'
+  | 'pause'
+  | 'stop'
+  | 'target'
+  | 'activity';
+
+function Icon({ name, className }: { name: IconName; className?: string }) {
+  let body: ReactNode = null;
+  switch (name) {
+    case 'bolt':
+      body = <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />;
+      break;
+    case 'nutrition':
+      body = (
+        <>
+          <path d="M12 8c0-3 2-5 5-5 0 3-2 5-5 5Z" />
+          <path d="M12 8c-2-2-5-2-7 0-2 2-2 6 0 9 1.5 2.2 3 4 4 4s1.5-1 3-1 2 1 3 1 2.5-1.8 4-4c2-3 2-7 0-9-2-2-5-2-7 0Z" />
+        </>
+      );
+      break;
+    case 'training':
+      body = (
+        <>
+          <path d="M6.5 6.5 17.5 17.5" />
+          <rect x="1.5" y="9" width="4" height="6" rx="1.2" />
+          <rect x="18.5" y="9" width="4" height="6" rx="1.2" />
+          <rect x="5" y="7.5" width="3" height="9" rx="1" />
+          <rect x="16" y="7.5" width="3" height="9" rx="1" />
+        </>
+      );
+      break;
+    case 'settings':
+      body = (
+        <>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6" />
+        </>
+      );
+      break;
+    case 'search':
+      body = (
+        <>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </>
+      );
+      break;
+    case 'sun':
+      body = (
+        <>
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+        </>
+      );
+      break;
+    case 'moon':
+      body = <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />;
+      break;
+    case 'arrow-up-right':
+      body = <path d="M7 17 17 7M8 7h9v9" />;
+      break;
+    case 'plus':
+      body = <path d="M12 5v14M5 12h14" />;
+      break;
+    case 'chevron-left':
+      body = <path d="m15 5-7 7 7 7" />;
+      break;
+    case 'chevron-right':
+      body = <path d="m9 5 7 7-7 7" />;
+      break;
+    case 'flame':
+      body = <path d="M12 3s5 4 5 9a5 5 0 0 1-10 0c0-2 1-3 1-3s0 1.5 1 2c0-3 3-5 3-8Z" />;
+      break;
+    case 'trash':
+      body = <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13h10l1-13" />;
+      break;
+    case 'play':
+      body = <path d="M7 4.5v15l12-7.5-12-7.5Z" />;
+      break;
+    case 'pause':
+      body = <path d="M8 5v14M16 5v14" />;
+      break;
+    case 'stop':
+      body = <rect x="6" y="6" width="12" height="12" rx="2" />;
+      break;
+    case 'target':
+      body = (
+        <>
+          <circle cx="12" cy="12" r="8.5" />
+          <circle cx="12" cy="12" r="4.5" />
+          <circle cx="12" cy="12" r="1" />
+        </>
+      );
+      break;
+    case 'activity':
+      body = <path d="M3 12h4l2.5-7 4 14 2.5-7H21" />;
+      break;
+  }
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {body}
+    </svg>
+  );
+}
+
+// ── Shell: sidebar + topbar ─────────────────────────────────
+function Sidebar({
+  section,
+  onNavigate,
+  nutritionCount,
+  trainingCount,
+}: {
+  section: Section;
+  onNavigate: (s: Section) => void;
+  nutritionCount: number;
+  trainingCount: number;
+}) {
+  return (
+    <aside className="sidebar">
+      <div className="brand side-brand">
+        <span className="logo-mark">
+          <Icon name="bolt" />
+        </span>
+        <span className="brand-text">
+          hypertroph<b>+</b>
+        </span>
+      </div>
+
+      <div className="side-section-label">Menu</div>
+      <nav className="nav-list">
+        <button
+          className={`nav-item ${section === 'nutrition' ? 'active' : ''}`}
+          aria-current={section === 'nutrition' ? 'page' : undefined}
+          onClick={() => onNavigate('nutrition')}
+        >
+          <Icon name="nutrition" className="nav-icon" /> Nutrition
+          {nutritionCount > 0 && <span className="nav-badge">{nutritionCount}</span>}
+        </button>
+        <button
+          className={`nav-item ${section === 'training' ? 'active' : ''}`}
+          aria-current={section === 'training' ? 'page' : undefined}
+          onClick={() => onNavigate('training')}
+        >
+          <Icon name="training" className="nav-icon" /> Training
+          {trainingCount > 0 && <span className="nav-badge">{trainingCount}</span>}
+        </button>
+      </nav>
+
+      <div className="side-section-label">General</div>
+      <nav className="nav-list">
+        <button
+          className={`nav-item ${section === 'settings' ? 'active' : ''}`}
+          aria-current={section === 'settings' ? 'page' : undefined}
+          onClick={() => onNavigate('settings')}
+        >
+          <Icon name="settings" className="nav-icon" /> Settings
+        </button>
+      </nav>
+
+      <div className="promo">
+        <h4>All your data, offline</h4>
+        <p>Nutrition and training stay on your device — no account, no cloud.</p>
+      </div>
+    </aside>
+  );
+}
+
+function Topbar({
+  theme,
+  onToggleTheme,
+  onSearch,
+}: {
+  theme: 'light' | 'dark';
+  onToggleTheme: () => void;
+  onSearch: () => void;
+}) {
+  return (
+    <header className="topbar">
+      <button className="search-pill" onClick={onSearch} aria-label="Search foods or exercises">
+        <Icon name="search" />
+        <span>Search foods or exercises</span>
+        <span className="kbd">Ctrl K</span>
+      </button>
+      <div className="spacer" />
+      <button
+        className="icon-circle"
+        title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
+        onClick={onToggleTheme}
+      >
+        <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+      </button>
+      <div className="avatar" aria-hidden="true" title="Account (placeholder)">
+        H
+      </div>
+    </header>
+  );
+}
+
+function PageHead({ title, subtitle, children }: { title: string; subtitle?: string; children?: ReactNode }) {
+  return (
+    <div className="page-head">
+      <div>
+        <h1 className="page-title">{title}</h1>
+        {subtitle && <p className="page-sub">{subtitle}</p>}
+      </div>
+      <div className="head-actions">{children}</div>
+    </div>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  unit,
+  chip,
+  featured,
+  onClick,
+  actionLabel,
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  chip?: string;
+  featured?: boolean;
+  onClick?: () => void;
+  actionLabel?: string;
+}) {
+  return (
+    <div className={`kpi ${featured ? 'featured' : ''}`}>
+      <span className="kpi-label">{label}</span>
+      {onClick && (
+        <button className="kpi-action" onClick={onClick} title={actionLabel} aria-label={actionLabel}>
+          <Icon name="arrow-up-right" />
+        </button>
+      )}
+      <span className="kpi-value">
+        {value}
+        {unit && <small>{unit}</small>}
+      </span>
+      {chip && <span className="kpi-chip">{chip}</span>}
+    </div>
+  );
+}
+
+function Gauge({ pct, label }: { pct: number; label: string }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const r = 80;
+  const len = Math.PI * r;
+  const filled = (clamped / 100) * len;
+  const path = `M20 100 A80 80 0 0 1 180 100`;
+  return (
+    <div className="gauge">
+      <svg viewBox="0 0 200 120" role="img" aria-label={`${Math.round(clamped)} percent of daily goal`}>
+        <defs>
+          <pattern id="gaugeHatch" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <rect width="8" height="8" fill="var(--hatch-bg)" />
+            <line x1="0" y1="0" x2="0" y2="8" stroke="var(--hatch-color)" strokeWidth="2" />
+          </pattern>
+        </defs>
+        <path d={path} fill="none" stroke="url(#gaugeHatch)" strokeWidth="16" strokeLinecap="round" />
+        <path
+          d={path}
+          fill="none"
+          stroke="var(--green-600)"
+          strokeWidth="16"
+          strokeLinecap="round"
+          strokeDasharray={`${filled} ${len}`}
+        />
+      </svg>
+      <div className="gauge-center">
+        <span className="gauge-val">{Math.round(clamped)}%</span>
+        <span className="gauge-label">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+function fmtTime(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  const cs = Math.floor((ms % 1000) / 10);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+}
+
+function Stopwatch() {
+  const [running, setRunning] = useState(false);
+  const [ms, setMs] = useState(0);
+  const baseRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!running) return;
+    baseRef.current = performance.now() - ms;
+    const tick = () => {
+      setMs(performance.now() - baseRef.current);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
+  return (
+    <>
+      <div className="timer-value">{fmtTime(ms)}</div>
+      <div className="timer-controls">
+        <button className={`timer-btn ${running ? '' : 'solid'}`} onClick={() => setRunning((r) => !r)}>
+          <Icon name={running ? 'pause' : 'play'} /> {running ? 'Pause' : 'Start'}
+        </button>
+        <button
+          className="timer-btn"
+          onClick={() => {
+            setRunning(false);
+            setMs(0);
+          }}
+        >
+          <Icon name="stop" /> Reset
+        </button>
+      </div>
+    </>
+  );
+}
+
 // ── Nutrition ───────────────────────────────────────────────
 function NutritionSection(props: {
   date: string;
@@ -834,28 +1154,125 @@ function NutritionSection(props: {
 }) {
   const kcal = props.totals.get('energy_kcal');
   const kcalTarget = props.targets.get('energy_kcal');
-  const pct = kcal && kcalTarget ? Math.min(100, (kcal.sumMilli / kcalTarget) * 100) : 0;
+  const kcalVal = kcal?.sumMilli ?? 0;
+  const kcalPct = kcalTarget ? (kcalVal / kcalTarget) * 100 : 0;
+  const protein = props.totals.get('protein_g');
+  const proteinTarget = props.targets.get('protein_g');
+  const remaining = kcalTarget != null ? Math.max(0, kcalTarget - kcalVal) : null;
+  const isToday = props.date === toISODate(new Date());
+  const macros = SUMMARY_NUTRIENTS.filter((n) => n !== 'energy_kcal');
 
   return (
     <>
-      <div className="row">
-        <h2>Nutrition · {props.date}</h2>
-        <div className="nav">
-          <button className="ghost" onClick={() => props.setDate(addDays(props.date, -1))}>
-            ‹ prev
+      <PageHead
+        title="Nutrition"
+        subtitle={`${isToday ? 'Today' : props.date} · ${formatNutrient(kcalVal, 'kcal')} of ${
+          kcalTarget ? formatNutrient(kcalTarget, 'kcal') : '—'
+        } kcal`}
+      >
+        <div className="date-nav">
+          <button
+            className="icon-circle"
+            aria-label="Previous day"
+            title="Previous day"
+            onClick={() => props.setDate(addDays(props.date, -1))}
+          >
+            <Icon name="chevron-left" />
           </button>
-          <button className="ghost" onClick={() => props.setDate(addDays(props.date, 1))}>
-            next ›
-          </button>
-          <button className="primary" onClick={() => props.onAddFood()}>
-            + Log food
+          <span className="date-label">{props.date}</span>
+          <button
+            className="icon-circle"
+            aria-label="Next day"
+            title="Next day"
+            onClick={() => props.setDate(addDays(props.date, 1))}
+          >
+            <Icon name="chevron-right" />
           </button>
         </div>
+        <button className="primary" onClick={() => props.onAddFood()}>
+          <Icon name="plus" /> Log food
+        </button>
+      </PageHead>
+
+      <div className="kpi-grid">
+        <KpiCard
+          featured
+          label="Calories today"
+          value={formatNutrient(kcalVal, 'kcal')}
+          unit=" kcal"
+          chip={`${Math.round(Math.min(100, kcalPct))}% of goal`}
+          onClick={() => props.onAddFood()}
+          actionLabel="Log food"
+        />
+        <KpiCard
+          label="Protein today"
+          value={protein ? formatNutrient(protein.sumMilli, 'g') : '0'}
+          unit=" g"
+          chip={proteinTarget ? `of ${formatNutrient(proteinTarget, 'g')} g` : 'no goal set'}
+        />
+        <KpiCard
+          label="Entries logged"
+          value={String(props.items.length)}
+          unit={props.items.length === 1 ? ' item' : ' items'}
+          chip={isToday ? 'today' : props.date}
+        />
+        <KpiCard
+          label="Calories left"
+          value={remaining != null ? formatNutrient(remaining, 'kcal') : '—'}
+          unit=" kcal"
+          chip={remaining != null ? 'to goal' : 'set a goal'}
+        />
       </div>
 
-      <div className="grid" style={{ marginTop: 12 }}>
-        <div className="card col-span-2">
-          <h3>Today's meals</h3>
+      <div className="dash">
+        <section className="card col-span-2">
+          <div className="card-head">
+            <h3>Macro breakdown</h3>
+            {kcal?.hasUnknown && <span className="tag partial">partial data</span>}
+          </div>
+          <div className="bar-list">
+            {macros.map((n) => {
+              const t = props.totals.get(n);
+              const target = props.targets.get(n);
+              const def = props.defById.get(n);
+              const p = t && target ? Math.min(100, (t.sumMilli / target) * 100) : 0;
+              return (
+                <div className="bar-item" key={n}>
+                  <div className="row small">
+                    <span>{def?.name ?? n}</span>
+                    <span className="mono">
+                      {t ? formatNutrient(t.sumMilli, def?.unit ?? 'g') : '0'} /{' '}
+                      {target ? formatNutrient(target, def?.unit ?? 'g') : '—'} {def?.unit ?? 'g'}
+                    </span>
+                  </div>
+                  <div className="pill-bar">
+                    <span style={{ width: `${p}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-head">
+            <h3>Calorie goal</h3>
+          </div>
+          <Gauge pct={kcalPct} label={kcalTarget ? `of ${formatNutrient(kcalTarget, 'kcal')} kcal` : 'no goal set'} />
+          <p className="muted small" style={{ textAlign: 'center', marginTop: 10 }}>
+            {kcalTarget ? `${formatNutrient(kcalVal, 'kcal')} consumed today` : 'Set a daily calorie target in Settings.'}
+          </p>
+        </section>
+      </div>
+
+      <div className="dash">
+        <section className="card col-span-2">
+          <div className="card-head">
+            <h3>Today's meals</h3>
+            <button className="primary small" onClick={() => props.onAddMeal()}>
+              <Icon name="plus" /> Add meal
+            </button>
+          </div>
           {props.meals.map((meal, i) => {
             const items = props.items.filter((it) => it.mealSection === meal);
             const mealKcal = items.reduce((acc, it) => {
@@ -863,17 +1280,20 @@ function NutritionSection(props: {
               return acc + (e?.amountMilli ?? 0);
             }, 0);
             return (
-              <div className={`meal meal-acc${i % 3}`} key={meal}>
+              <div className="meal" key={meal}>
                 <div className="meal-head row">
                   <strong className="meal-name">
                     <span className="meal-index">M{i + 1}</span>
+                    {items.length > 0 ? (
+                      <span className="status-chip done">{items.length} logged</span>
+                    ) : (
+                      <span className="status-chip miss">empty</span>
+                    )}
                   </strong>
-                  <span className="muted small">
-                    {items.length} item{items.length === 1 ? '' : 's'} · {formatNutrient(mealKcal, 'kcal')} kcal
-                  </span>
+                  <span className="muted small">{formatNutrient(mealKcal, 'kcal')} kcal</span>
                   <div className="nav">
                     <button className="ghost small" title={`Add to M${i + 1}`} onClick={() => props.onAddFood(meal)}>
-                      + Add
+                      <Icon name="plus" /> Add
                     </button>
                     <button
                       className="ghost small danger"
@@ -881,7 +1301,7 @@ function NutritionSection(props: {
                       disabled={props.meals.length <= 1}
                       onClick={() => props.onRemoveMeal(meal)}
                     >
-                      ✕
+                      <Icon name="trash" />
                     </button>
                   </div>
                 </div>
@@ -891,79 +1311,47 @@ function NutritionSection(props: {
                   return (
                     <div className="item" key={it.id}>
                       <span>
-                        {it.label} <span className="muted small">{it.quantityG ? `· ${it.portionLabel ?? `${Math.round(it.quantityG)} g`}` : ''}</span>
+                        {it.label}{' '}
+                        <span className="muted small">
+                          {it.quantityG ? `· ${it.portionLabel ?? `${Math.round(it.quantityG)} g`}` : ''}
+                        </span>
                       </span>
                       <span className="mono small">
                         {formatNutrient(e?.amountMilli ?? null, 'kcal')} kcal · P{formatNutrient(p?.amountMilli ?? null, 'g')}
                       </span>
                       <button className="ghost small" onClick={() => props.onDelete(it.id)} title="Delete">
-                        ✕
+                        <Icon name="trash" />
                       </button>
                     </div>
                   );
                 })}
-                {items.length === 0 && <div className="muted small">No entries.</div>}
               </div>
             );
           })}
+          <p className="muted small" style={{ marginTop: 12 }}>
+            Meals are just M1, M2, M3… Adding one appends M{props.meals.length + 1}. Removing a meal hides its section, but
+            items logged under it still count toward today's totals.
+          </p>
+        </section>
 
-          <div className="add-meal">
-            <button className="primary" onClick={() => props.onAddMeal()}>
-              + Add meal
+        <section className="card">
+          <div className="card-head">
+            <h3>Recent foods</h3>
+            <button className="ghost small" onClick={props.onCreateCustom}>
+              <Icon name="plus" /> Custom
             </button>
           </div>
-          <p className="muted small" style={{ marginTop: 8 }}>
-            Meals are just M1, M2, M3… Adding one appends M{props.meals.length + 1}. Removing a meal hides its section,
-            but items logged under it still count toward today's totals.
-          </p>
-        </div>
-
-        <div className="card">
-          <h3>Daily targets</h3>
-          <div className="row">
-            <strong className="mono">
-              {kcal ? formatNutrient(kcal.sumMilli, 'kcal') : '0'} / {kcalTarget ? formatNutrient(kcalTarget, 'kcal') : '—'} kcal
-            </strong>
-            {kcal?.hasUnknown && <span className="tag partial">partial data</span>}
-          </div>
-          <div className="bar">
-            <div style={{ width: `${pct}%` }} />
-          </div>
-          {SUMMARY_NUTRIENTS.filter((n) => n !== 'energy_kcal').map((n) => {
-            const t = props.totals.get(n);
-            const target = props.targets.get(n);
-            const def = props.defById.get(n);
-            const p = t && target ? Math.min(100, (t.sumMilli / target) * 100) : 0;
-            return (
-              <div key={n}>
-                <div className="row small">
-                  <span className="muted">{def?.name ?? n}</span>
-                  <span className="mono">
-                    {t ? formatNutrient(t.sumMilli, def?.unit ?? 'g') : '0'} / {target ? formatNutrient(target, def?.unit ?? 'g') : '—'}
-                  </span>
-                </div>
-                <div className={`bar ${n === 'protein_g' ? 'protein' : n === 'fat_g' ? 'fat' : ''}`}>
-                  <div style={{ width: `${p}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="card">
-          <h3>Recent</h3>
-          {props.recentFoods.map((f) => (
-            <div key={f.id} className="row small">
-              <button className="link" onClick={() => props.onPickRecent(f)}>
-                {f.name}
-              </button>
-            </div>
-          ))}
           {props.recentFoods.length === 0 && <p className="muted small">Nothing logged yet.</p>}
-          <button className="ghost" style={{ marginTop: 12 }} onClick={props.onCreateCustom}>
-            + Create custom food
-          </button>
-        </div>
+          {props.recentFoods.map((f) => (
+            <button key={f.id} className="list-row" onClick={() => props.onPickRecent(f)}>
+              <span className="icon-tile soft">
+                <Icon name="nutrition" />
+              </span>
+              <span className="grow ellipsis">{f.name}</span>
+              <Icon name="chevron-right" className="chev" />
+            </button>
+          ))}
+        </section>
       </div>
     </>
   );
@@ -989,67 +1377,160 @@ function TrainingSection(props: {
   onDeletePlan: (id: string) => void;
   getLastSet: (exerciseId: string) => LastSetHint | null;
 }) {
+  const totalSets = [...props.weeklyVolume.values()].reduce((a, b) => a + b, 0);
+  const exerciseCount = props.activeWorkout?.exercises.length ?? 0;
+  const nextRoutine = props.routines[0];
+
   return (
     <>
-      <div className="row">
-        <h2>{props.activeWorkout ? props.activeWorkout.name : 'Training'}</h2>
+      <PageHead
+        title={props.activeWorkout ? props.activeWorkout.name : 'Training'}
+        subtitle={
+          props.activeWorkout
+            ? `Active workout · ${exerciseCount} exercise${exerciseCount === 1 ? '' : 's'}`
+            : 'Track sets, follow a plan and watch your weekly volume.'
+        }
+      >
+        <button className="ghost" onClick={props.onAddExercise}>
+          <Icon name="plus" /> Exercise
+        </button>
         {props.activeWorkout && (
-          <div className="nav">
-            <button className="ghost" onClick={props.onAddExercise}>
-              + Exercise
-            </button>
-            <button className="primary" onClick={props.onFinish}>
-              Finish
-            </button>
-          </div>
+          <button className="primary" onClick={props.onFinish}>
+            Finish workout
+          </button>
         )}
+      </PageHead>
+
+      <div className="kpi-grid">
+        <KpiCard featured label="Working sets (7d)" value={totalSets.toFixed(0)} unit=" sets" chip="this week" />
+        <KpiCard
+          label="Active workout"
+          value={props.activeWorkout ? 'On' : '—'}
+          chip={props.activeWorkout ? `${exerciseCount} exercises` : 'none yet'}
+        />
+        <KpiCard
+          label="Saved plans"
+          value={String(props.routines.length)}
+          unit={props.routines.length === 1 ? ' plan' : ' plans'}
+          chip="ready to start"
+        />
+        <KpiCard
+          label="Exercises today"
+          value={String(exerciseCount)}
+          unit={exerciseCount === 1 ? ' exercise' : ' exercises'}
+          chip="in this session"
+        />
       </div>
 
-      {!props.activeWorkout ? (
-        <>
-          <div className="segments" role="tablist" aria-label="Workout start mode" style={{ marginTop: 12 }}>
-            <button
-              role="tab"
-              aria-selected={props.mode === 'random'}
-              className={`segment ${props.mode === 'random' ? 'active' : ''}`}
-              onClick={() => props.onModeChange('random')}
-            >
-              Random
-            </button>
-            <button
-              role="tab"
-              aria-selected={props.mode === 'plan'}
-              className={`segment ${props.mode === 'plan' ? 'active' : ''}`}
-              onClick={() => props.onModeChange('plan')}
-            >
-              Your workout plan
-            </button>
-          </div>
+      <div className="dash">
+        <section className="card col-span-2">
+          <Progress weeklyVolume={props.weeklyVolume} muscleNames={props.muscleNames} secondaryFactor={props.secondaryFactor} />
+        </section>
 
-          {props.mode === 'random' ? (
-            <div className="card" style={{ marginTop: 12 }}>
-              <p className="muted">No active workout. Start one to log sets.</p>
-              <div className="nav" style={{ marginTop: 8 }}>
-                <button className="primary" onClick={props.onStartRandom}>
-                  Start workout
+        <section className="card next-card">
+          <div className="card-head">
+            <h3>Next session</h3>
+          </div>
+          {props.activeWorkout ? (
+            <>
+              <div className="list-row">
+                <span className="icon-tile">
+                  <Icon name="activity" />
+                </span>
+                <span className="grow">
+                  <strong>In progress</strong>
+                  <div className="muted small">
+                    {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'} logged
+                  </div>
+                </span>
+              </div>
+              <button className="primary block" onClick={props.onFinish}>
+                Finish workout
+              </button>
+            </>
+          ) : nextRoutine ? (
+            <>
+              <div className="list-row">
+                <span className="icon-tile blue">
+                  <Icon name="training" />
+                </span>
+                <span className="grow">
+                  <strong>{nextRoutine.name}</strong>
+                  <div className="muted small">
+                    {nextRoutine.exerciseCount} {nextRoutine.exerciseCount === 1 ? 'exercise' : 'exercises'}
+                  </div>
+                </span>
+              </div>
+              <button className="primary block" onClick={() => props.onStartRoutine(nextRoutine.id)}>
+                Start {nextRoutine.name}
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="muted small">No saved plans yet. Start a free workout, or build a plan below.</p>
+              <button className="primary block" onClick={props.onStartRandom}>
+                Start workout
+              </button>
+            </>
+          )}
+        </section>
+      </div>
+
+      <div className="dash">
+        <section className="card col-span-2">
+          <div className="card-head">
+            <h3>{props.activeWorkout ? 'Exercises' : 'Workout plans'}</h3>
+            {!props.activeWorkout && (
+              <div className="segments" role="tablist" aria-label="Workout start mode">
+                <button
+                  role="tab"
+                  aria-selected={props.mode === 'random'}
+                  className={`segment ${props.mode === 'random' ? 'active' : ''}`}
+                  onClick={() => props.onModeChange('random')}
+                >
+                  Random
                 </button>
-                <button className="ghost" onClick={props.onAddExercise}>
-                  + Exercise
+                <button
+                  role="tab"
+                  aria-selected={props.mode === 'plan'}
+                  className={`segment ${props.mode === 'plan' ? 'active' : ''}`}
+                  onClick={() => props.onModeChange('plan')}
+                >
+                  Plan
                 </button>
               </div>
-            </div>
+            )}
+          </div>
+
+          {props.activeWorkout ? (
+            props.activeWorkout.exercises.length === 0 ? (
+              <p className="muted">Add an exercise to begin.</p>
+            ) : (
+              <div className="grid">
+                {props.activeWorkout.exercises.map((we) => (
+                  <ExerciseCard key={we.id} we={we} units={props.units} onAddSet={props.onAddSet} getLastSet={props.getLastSet} />
+                ))}
+              </div>
+            )
+          ) : props.mode === 'random' ? (
+            <>
+              <p className="muted">No active workout. Start one to log sets.</p>
+              <div className="nav" style={{ marginTop: 12 }}>
+                <button className="primary" onClick={props.onStartRandom}>
+                  <Icon name="play" /> Start workout
+                </button>
+              </div>
+            </>
           ) : (
-            <div style={{ marginTop: 12 }}>
-              <div className="row" style={{ marginBottom: 8 }}>
+            <>
+              <div className="row" style={{ marginBottom: 12 }}>
                 <span className="muted small">Pick a saved plan to start, or build a new one.</span>
                 <button className="ghost" onClick={props.onNewPlan}>
-                  + New plan
+                  <Icon name="plus" /> New plan
                 </button>
               </div>
               {props.routines.length === 0 && (
-                <div className="card">
-                  <p className="muted">You don't have any workout plans yet. Create one to get started.</p>
-                </div>
+                <p className="muted">You don't have any workout plans yet. Create one to get started.</p>
               )}
               <div className="grid">
                 {props.routines.map((r) => (
@@ -1075,23 +1556,15 @@ function TrainingSection(props: {
                   </div>
                 ))}
               </div>
-            </div>
+            </>
           )}
-        </>
-      ) : (
-        <div className="grid" style={{ marginTop: 12 }}>
-          {props.activeWorkout.exercises.map((we) => (
-            <ExerciseCard key={we.id} we={we} units={props.units} onAddSet={props.onAddSet} getLastSet={props.getLastSet} />
-          ))}
-          {props.activeWorkout.exercises.length === 0 && (
-            <div className="card">
-              <p className="muted">Add an exercise to begin.</p>
-            </div>
-          )}
-        </div>
-      )}
+        </section>
 
-      <Progress weeklyVolume={props.weeklyVolume} muscleNames={props.muscleNames} secondaryFactor={props.secondaryFactor} />
+        <section className="timer-card">
+          <h3>Session timer</h3>
+          <Stopwatch />
+        </section>
+      </div>
     </>
   );
 }
@@ -1281,22 +1754,27 @@ function Progress(props: { weeklyVolume: Map<string, number>; muscleNames: Map<s
   const rows = [...props.weeklyVolume.entries()].sort((a, b) => b[1] - a[1]);
   return (
     <>
-      <h2 style={{ marginTop: 20 }}>Weekly working-set volume</h2>
-      <p className="muted small">Primary sets counted 1×; secondary counted {props.secondaryFactor}×. Warm-up sets excluded.</p>
-      <div className="card" style={{ marginTop: 12 }}>
-        {rows.length === 0 && <p className="muted">No working sets logged this week.</p>}
-        {rows.map(([m, v]) => (
-          <div key={m} style={{ marginBottom: 10 }}>
-            <div className="row small">
-              <span>{props.muscleNames.get(m) ?? m}</span>
-              <span className="mono">{v.toFixed(1)} sets</span>
-            </div>
-            <div className="bar">
-              <div style={{ width: `${(v / max) * 100}%` }} />
-            </div>
-          </div>
-        ))}
+      <div className="card-head">
+        <h3>Weekly working-set volume</h3>
+        <span className="muted small">7 days · secondary ×{props.secondaryFactor}</span>
       </div>
+      {rows.length === 0 ? (
+        <p className="muted">No working sets logged this week.</p>
+      ) : (
+        <div className="bar-list">
+          {rows.map(([m, v]) => (
+            <div className="bar-item" key={m}>
+              <div className="row small">
+                <span>{props.muscleNames.get(m) ?? m}</span>
+                <span className="mono">{v.toFixed(1)} sets</span>
+              </div>
+              <div className="pill-bar">
+                <span style={{ width: `${(v / max) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }
@@ -1320,8 +1798,8 @@ function Settings(props: {
   const fileRef = useRef<HTMLInputElement>(null);
   return (
     <>
-      <h2>Settings</h2>
-      <div className="grid" style={{ marginTop: 12 }}>
+      <PageHead title="Settings" subtitle="Preferences, daily targets and local backups" />
+      <div className="grid" style={{ marginTop: 16 }}>
         <div className="card">
           <h3>Units</h3>
           <div className="row">
