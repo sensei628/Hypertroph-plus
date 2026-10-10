@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "hypertroph+ \u2014 offline-first nutrition & hypertrophy training tracker (base model)",
+  "description": "hypertroph+ — offline-first nutrition & hypertrophy training tracker (base model)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && node tools/compliance/check-compliance.mjs && vite build",
@@ -16,14 +16,26 @@
     "data:build:usda": "node tools/import/build-usda.mjs",
     "data:download:exercises": "powershell -ExecutionPolicy Bypass -File tools/import/download-exercises.ps1",
     "data:build:exercises": "node tools/import/import-exercises.mjs",
-    "data:verify": "node tools/import/verify-ref.mjs"
+    "data:verify": "node tools/import/verify-ref.mjs",
+    "cap:sync": "npm run build && cap sync",
+    "cap:add:android": "cap add android",
+    "cap:add:ios": "cap add ios",
+    "mobile:android": "npm run build && cap sync android && cap open android",
+    "mobile:ios": "npm run build && cap sync ios && cap open ios"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/filesystem": "^8.1.4",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/share": "^8.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sql.js": "^1.12.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/sql.js": "^1.4.9",

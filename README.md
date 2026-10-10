@@ -32,6 +32,19 @@ npm.cmd run test     # 23 unit + integration tests
 > On this machine the PowerShell `npm` shim is blocked by execution policy; use `npm.cmd`
 > (or run the binaries under `node_modules\.bin\`).
 
+## Mobile (Android & iOS)
+
+The same app runs on Android and iOS as a fully offline native build via **Capacitor**
+(see [`MOBILE.md`](./MOBILE.md)). The tracking logic, schema, calculations and UI are
+unchanged; only the on-device store (a real SQLite file instead of `localStorage`) and
+backup/restore are native additions. No backend, no account, no network.
+
+```bash
+npm run cap:sync          # build web bundle + copy into android/ and ios/
+npm run mobile:android    # open the Android project (needs Android Studio/SDK)
+npm run mobile:ios        # open the iOS project (needs macOS/Xcode)
+```
+
 ## Data & licensing
 
 hypertroph+ ships as an offline, redistributable product with **no paid licences**. The

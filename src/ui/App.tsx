@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { loadDatabase } from '../data/db';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { App as CapApp } from '@capacitor/app';
+import { loadDatabase, exportDatabaseBytes, flushPersistence, type DB } from '../data/db';
 import { loadRefDatabase } from '../data/refdb';
+import { exportBackup, importBackup } from '../data/backup';
 import {
   SqliteRepository,
   type BodyMetricType,
@@ -98,6 +100,7 @@ function buildMeals(r: SqliteRepository): string[] {
 export function App() {
   const [repo, setRepo] = useState<SqliteRepository | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dbRef = useRef<DB | null>(null);
   const [section, setSection] = useState<Section>('nutrition');
   const [date, setDate] = useState<string>(toISODate(new Date()));
 
@@ -139,6 +142,7 @@ export function App() {
         const ref = await loadRefDatabase();
         const r = new SqliteRepository(db, ref);
         if (cancelled) return;
+        dbRef.current = db;
         setRepo(r);
         setNutrientDefs(r.getNutrientDefs());
         setTargets(r.getTargets());
@@ -185,6 +189,47 @@ export function App() {
     const t = setTimeout(() => setToast(null), 3200);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Flush any pending on-device database write when the app is backgrounded or
+  // closed, so nothing is lost between the debounced writes.
+  useEffect(() => {
+    const sub = CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive) void flushPersistence();
+    });
+    const onHide = () => void flushPersistence();
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('visibilitychange', onHide);
+    return () => {
+      void sub.then((s) => s.remove());
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('visibilitychange', onHide);
+    };
+  }, []);
+
+  const handleExportBackup = useCallback(async () => {
+    if (!dbRef.current) return;
+    try {
+      const how = await exportBackup(exportDatabaseBytes(dbRef.current));
+      setToast(how === 'shared' ? 'Backup ready — choose where to save it' : 'Backup file downloaded');
+    } catch (e) {
+      setToast(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, []);
+
+  const handleImportBackup = useCallback(async (file: File) => {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const report = await importBackup(bytes);
+      if (!report.ok) {
+        setToast(`Import failed: ${report.error ?? 'invalid backup file'}`);
+        return;
+      }
+      // importBackup only writes after validation; reload to rebuild from it.
+      window.location.reload();
+    } catch (e) {
+      setToast(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, []);
 
   // Apply the active theme class to <html>; keeps the loading screen themed too.
   useEffect(() => {
@@ -644,6 +689,8 @@ export function App() {
             targets={targets}
             defById={defById}
             onChangeTarget={changeTarget}
+            onExportBackup={handleExportBackup}
+            onImportBackup={handleImportBackup}
           />
         )}
       </div>
@@ -1231,7 +1278,10 @@ function Settings(props: {
   targets: Map<string, number>;
   defById: Map<string, NutrientDef>;
   onChangeTarget: (id: string, value: number) => void;
+  onExportBackup: () => void;
+  onImportBackup: (file: File) => void;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
   return (
     <>
       <h2>Settings</h2>
@@ -1290,10 +1340,34 @@ function Settings(props: {
         </div>
 
         <div className="card">
-          <h3>Data & privacy</h3>
+          <h3>Backup &amp; restore</h3>
           <p className="small muted">
-            Local-only. No account, no telemetry. This base model persists to your browser's local storage; the desktop build uses an
-            on-device SQLite file.
+            Your records live only on this device. Export a portable backup file regularly and keep it somewhere safe — if the app
+            is uninstalled or the device is lost without a backup, the data cannot be recovered.
+          </p>
+          <div className="nav" style={{ marginTop: 10 }}>
+            <button className="primary" onClick={props.onExportBackup}>
+              Export backup
+            </button>
+            <button onClick={() => fileRef.current?.click()}>Import backup…</button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".sqlite,.db,application/vnd.sqlite3,application/octet-stream"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) props.onImportBackup(f);
+                e.target.value = '';
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="card">
+          <h3>Data &amp; privacy</h3>
+          <p className="small muted">
+            Local-only. No account, no telemetry, no network access. Stored in a private SQLite file on this device.
           </p>
         </div>
       </div>

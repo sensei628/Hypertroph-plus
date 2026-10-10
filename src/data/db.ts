@@ -5,10 +5,9 @@ import schemaSql from '../../db/schema.sql?raw';
 import seedSql from '../../db/seed.sql?raw';
 import exercisesSql from '../../db/exercises.sql?raw';
 import exerciseCategoriesSql from '../../db/exercise_categories.sql?raw';
+import { storage } from './storage';
 
 export type DB = Database;
-
-const PERSIST_KEY = 'hypertroph.db.v1';
 
 // Schema/data migrations applied to existing (persisted) databases. Version 1 is
 // the initial schema+seed; later versions are idempotent data/provenance fixes.
@@ -327,45 +326,21 @@ export async function getSqlStatic(): Promise<SqlJsStatic> {
   return sqlStatic;
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let bin = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(bin);
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
-}
-
-export function getStorage(): Storage | null {
-  try {
-    return typeof localStorage !== 'undefined' ? localStorage : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Load the SQLite database. In the browser base model this uses sql.js (WASM)
- * with a localStorage persisted image. In the Tauri build, this function is
- * replaced by a rusqlite-backed implementation behind the same repository API.
+ * Load the SQLite database. Persistence is delegated to the platform storage
+ * adapter (see ./storage): a real on-device file under Capacitor, localStorage
+ * on the web. The schema, seed and migration logic are identical to the web
+ * build.
  */
 export async function loadDatabase(): Promise<DB> {
   const SQL = await getSqlStatic();
 
-  const storage = getStorage();
-  const stored = storage?.getItem(PERSIST_KEY);
+  const stored = await storage.load();
   let db: DB;
   let fresh = false;
 
   if (stored) {
-    db = new SQL.Database(base64ToBytes(stored));
+    db = new SQL.Database(stored);
   } else {
     db = new SQL.Database();
     db.run(schemaSql);
@@ -379,18 +354,19 @@ export async function loadDatabase(): Promise<DB> {
   return db;
 }
 
+/** Queue the current database image to platform storage. */
 export function persist(db: DB): void {
-  const storage = getStorage();
-  if (!storage) return;
-  try {
-    storage.setItem(PERSIST_KEY, bytesToBase64(db.export()));
-  } catch {
-    /* quota or unavailable storage - non-fatal for the base model */
-  }
+  storage.save(db.export());
 }
 
-export function resetDatabase(): void {
-  getStorage()?.removeItem(PERSIST_KEY);
+/** Remove the persisted image and flush any pending native write. */
+export async function resetDatabase(): Promise<void> {
+  await storage.reset();
+}
+
+/** Wait for any queued/in-flight native persistence write to complete. */
+export function flushPersistence(): Promise<void> {
+  return storage.flush();
 }
 
 export function exportDatabaseBytes(db: DB): Uint8Array {
