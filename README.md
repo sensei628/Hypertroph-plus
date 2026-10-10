@@ -6,6 +6,9 @@ This repository currently contains the **base model**: a runnable, tested founda
 validate direction before committing to the full desktop (Tauri/Rust) build. It implements the
 real data model, the integrity guarantees, and the core UX flows.
 
+> New here? **[`GETTING_STARTED.md`](./GETTING_STARTED.md)** has the current status and how to
+> run every target (web, Windows desktop, Android/iOS) plus backup and release steps.
+
 ## Status
 
 | Area | State |
