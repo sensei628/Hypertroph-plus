@@ -929,7 +929,7 @@ function Sidebar({
     <aside className="sidebar">
       <div className="brand side-brand">
         <span className="logo-mark">
-          <Icon name="bolt" />
+          <span className="logo-mark-word">H+</span>
         </span>
         <span className="brand-text">
           hypertroph<b>+</b>
