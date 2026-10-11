@@ -136,6 +136,7 @@ export function App() {
     training: { count: 0, firstDate: null, lastDate: null },
     body: { count: 0, firstDate: null, lastDate: null },
   });
+  const [refReady, setRefReady] = useState(false);
 
   const [palette, setPalette] = useState<PaletteMode | null>(null);
   const [palettePurpose, setPalettePurpose] = useState<'log' | 'builder'>('log');
@@ -153,8 +154,14 @@ export function App() {
     (async () => {
       try {
         const db = await loadDatabase();
-        const ref = await loadRefDatabase();
-        const r = new SqliteRepository(db, ref);
+        // The reference pack (USDA catalog, ~14 MB gzipped) is fetched in the
+        // background and attached when ready so it never blocks first render.
+        const r = new SqliteRepository(db);
+        void loadRefDatabase().then((ref) => {
+          if (cancelled) return;
+          if (ref) r.setRefDatabase(ref);
+          setRefReady(true);
+        });
         if (cancelled) return;
         dbRef.current = db;
         setRepo(r);
@@ -315,16 +322,16 @@ export function App() {
     return m;
   }, [nutrientDefs]);
 
-  const searchFoods = useCallback((q: string, limit?: number, filters?: FoodFilters) => repo?.searchFoods(q, limit, filters) ?? [], [repo]);
-  const countFoods = useCallback((q: string, filters?: FoodFilters) => repo?.countFoods(q, filters) ?? 0, [repo]);
+  const searchFoods = useCallback((q: string, limit?: number, filters?: FoodFilters) => repo?.searchFoods(q, limit, filters) ?? [], [repo, refReady]);
+  const countFoods = useCallback((q: string, filters?: FoodFilters) => repo?.countFoods(q, filters) ?? 0, [repo, refReady]);
   const searchExercises = useCallback((q: string, limit?: number, filters?: ExerciseFilters) => repo?.searchExercises(q, limit, filters) ?? [], [repo]);
   const countExercises = useCallback((q: string, filters?: ExerciseFilters) => repo?.countExercises(q, filters) ?? 0, [repo]);
-  const getFood = useCallback((id: string) => repo?.getFood(id) ?? null, [repo]);
+  const getFood = useCallback((id: string) => repo?.getFood(id) ?? null, [repo, refReady]);
   const getExercise = useCallback((id: string) => repo?.getExercise(id) ?? null, [repo]);
   const getLastSet = useCallback((id: string): LastSetHint | null => repo?.getLastSetForExercise(id) ?? null, [repo]);
   const getFoodFacets = useCallback(
     (q: string) => repo?.getFoodFacets(q) ?? { foodTypes: [], entryTypes: [], prepStates: [] },
-    [repo],
+    [repo, refReady],
   );
   const getExerciseFacets = useCallback(
     (q: string) => repo?.getExerciseFacets(q) ?? { categories: [], equipment: [], muscles: [] },
@@ -768,6 +775,7 @@ export function App() {
           favoriteExerciseIds={favoriteExerciseIds}
           pinnedFoods={pinnedFoods}
           pinnedExercises={pinnedExercises}
+          refLoading={!refReady}
           onToggleFavorite={toggleFavorite}
           onAddBodyMetric={addBodyMetric}
           onPickFood={openLog}

@@ -24,6 +24,8 @@ type SortMode = 'name' | 'recent' | 'favorite';
 interface Props {
   initialMode: PickType;
   tabs?: Tab[];
+  /** True while the full USDA food catalog is still downloading in the background. */
+  refLoading?: boolean;
   searchFoods: (q: string, limit: number, filters?: FoodFilters) => FoodSummary[];
   countFoods: (q: string, filters?: FoodFilters) => number;
   getFoodFacets: (q: string) => FoodFacets;
@@ -119,6 +121,7 @@ function FacetBar(props: {
 export function CommandPalette({
   initialMode,
   tabs,
+  refLoading = false,
   searchFoods,
   countFoods,
   getFoodFacets,
@@ -376,6 +379,11 @@ export function CommandPalette({
               />
             )}
             <div className="sort-row">
+              {tab === 'food' && refLoading && (
+                <span className="small muted" style={{ marginRight: 'auto' }}>
+                  Full catalog still downloading — showing local foods
+                </span>
+              )}
               <span className="small muted">Sort</span>
               <div className="segments small">
                 {(['name', 'recent', 'favorite'] as SortMode[]).map((s) => (

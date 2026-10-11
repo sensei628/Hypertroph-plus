@@ -369,6 +369,15 @@ export interface DataPort {
 export class SqliteRepository implements DataPort {
   constructor(private db: DB, private ref: DB | null = null) {}
 
+  /**
+   * Attach (or detach) the read-only reference pack after construction, so the
+   * big USDA catalog can be downloaded in the background instead of gating app
+   * startup. Food search degrades to local foods until this is set.
+   */
+  setRefDatabase(ref: DB | null): void {
+    this.ref = ref;
+  }
+
   private rows<T>(sql: string, params: unknown[] = []): T[] {
     return queryAll<T>(this.db, sql, params);
   }
