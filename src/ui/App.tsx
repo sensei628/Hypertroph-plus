@@ -8,6 +8,8 @@ import {
   SqliteRepository,
   type BodyMetricType,
   type DayItemRow,
+  type DeleteMode,
+  type DeleteScope,
   type ExerciseFilters,
   type ExerciseSummary,
   type FoodDetail,
@@ -18,6 +20,8 @@ import {
   type RoutineSummary,
   type WorkoutExerciseRow,
   type WorkoutRow,
+  type RecordStats,
+  type ScopeStats,
 } from '../data/repository';
 import { formatNutrient, toMilli } from '../domain/nutrients';
 import { LogItem, sumNutrients, snapshotLogItem } from '../domain/nutrition';
@@ -127,6 +131,11 @@ export function App() {
   const [routines, setRoutines] = useState<RoutineSummary[]>([]);
   const [trainingMode, setTrainingMode] = useState<TrainingMode>('random');
   const [builder, setBuilder] = useState<BuilderState | null>(null);
+  const [recordStats, setRecordStats] = useState<RecordStats>({
+    nutrition: { count: 0, firstDate: null, lastDate: null },
+    training: { count: 0, firstDate: null, lastDate: null },
+    body: { count: 0, firstDate: null, lastDate: null },
+  });
 
   const [palette, setPalette] = useState<PaletteMode | null>(null);
   const [palettePurpose, setPalettePurpose] = useState<'log' | 'builder'>('log');
@@ -181,6 +190,7 @@ export function App() {
     setFavoriteExerciseIds([...repo.favoriteIds('exercise')]);
     setActiveWorkout(repo.getActiveWorkout(date));
     setRoutines(repo.listRoutines());
+    setRecordStats(repo.getRecordStats());
     const [ws, we] = weekRange(date);
     setWeeklyVolume(repo.getWeeklyVolume(ws, we, secondaryFactor));
   }, [repo, date, secondaryFactor]);
@@ -258,6 +268,17 @@ export function App() {
       if (!r.ok) setUpdate({ state: 'error', message: r.reason ?? 'updates unavailable' });
     });
   }, [desktop]);
+
+  const handleDeleteRecords = useCallback(
+    (scope: DeleteScope, mode: DeleteMode, date?: string): number => {
+      if (!repo) return 0;
+      const n = repo.deleteRecords(scope, mode, date);
+      refresh();
+      setToast(n > 0 ? `Deleted ${n} record${n === 1 ? '' : 's'}` : 'Nothing to delete');
+      return n;
+    },
+    [repo, refresh],
+  );
 
   // Apply the active theme class to <html>; keeps the loading screen themed too.
   useEffect(() => {
@@ -687,6 +708,9 @@ export function App() {
               onChangeTarget={changeTarget}
               onExportBackup={handleExportBackup}
               onImportBackup={handleImportBackup}
+              stats={recordStats}
+              onCountDelete={(scope, mode, date) => repo.countRecords(scope, mode, date)}
+              onDeleteRecords={handleDeleteRecords}
               isDesktop={!!desktop}
               appVersion={appVersion}
               update={update}
@@ -1774,6 +1798,43 @@ function Progress(props: { weeklyVolume: Map<string, number>; muscleNames: Map<s
 }
 
 // ── Settings ────────────────────────────────────────────────
+const DELETE_SCOPES: { id: DeleteScope; label: string }[] = [
+  { id: 'nutrition', label: 'Nutrition' },
+  { id: 'training', label: 'Training' },
+  { id: 'body', label: 'Body metrics' },
+];
+
+const DELETE_MODES: { id: DeleteMode; label: string; needsDate: boolean }[] = [
+  { id: 'all', label: 'Erase all', needsDate: false },
+  { id: 'before', label: 'Before…', needsDate: true },
+  { id: 'on', label: 'On…', needsDate: true },
+  { id: 'last', label: 'Last', needsDate: false },
+];
+
+function deleteScopeName(scope: DeleteScope): string {
+  if (scope === 'nutrition') return 'nutrition log';
+  if (scope === 'training') return 'training entries';
+  return 'body metrics';
+}
+
+function deleteActionLabel(scope: DeleteScope, mode: DeleteMode, date: string, count: number): string {
+  switch (mode) {
+    case 'all':
+      return `all ${deleteScopeName(scope)} (${count})`;
+    case 'last':
+      return `the most recent ${deleteScopeName(scope)}`;
+    case 'before':
+      return `${count} records dated before ${date}`;
+    case 'on':
+      return `${count} records dated ${date}`;
+  }
+}
+
+function scopeRangeLabel(stat: ScopeStats): string {
+  if (stat.count === 0) return 'No entries yet';
+  return `${stat.count} entr${stat.count === 1 ? 'y' : 'ies'} · ${stat.firstDate} → ${stat.lastDate}`;
+}
+
 function Settings(props: {
   units: 'kg' | 'lb';
   onChangeUnits: (u: 'kg' | 'lb') => void;
@@ -1784,12 +1845,26 @@ function Settings(props: {
   onChangeTarget: (id: string, value: number) => void;
   onExportBackup: () => void;
   onImportBackup: (file: File) => void;
+  stats: RecordStats;
+  onCountDelete: (scope: DeleteScope, mode: DeleteMode, date?: string) => number;
+  onDeleteRecords: (scope: DeleteScope, mode: DeleteMode, date?: string) => void;
   isDesktop: boolean;
   appVersion: string | null;
   update: UpdateStatus | null;
   onCheckUpdates: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [delScope, setDelScope] = useState<DeleteScope>('nutrition');
+  const [delMode, setDelMode] = useState<DeleteMode>('before');
+  const [delDate, setDelDate] = useState<string>(toISODate(new Date()));
+  const [delConfirm, setDelConfirm] = useState(false);
+  const [delCount, setDelCount] = useState(0);
+  const delStat = props.stats[delScope];
+
+  useEffect(() => {
+    const c = props.onCountDelete(delScope, delMode, delDate);
+    setDelCount(c);
+  }, [props, delScope, delMode, delDate]);
   return (
     <>
       <PageHead title="Settings" subtitle="Preferences, daily targets and local backups" />
@@ -1877,6 +1952,93 @@ function Settings(props: {
           <p className="small muted">
             Local-only. No account, no telemetry, no network access. Stored in a private SQLite file on this device.
           </p>
+        </div>
+
+        <div className="card">
+          <h3>Delete records</h3>
+          <p className="small muted">
+            Permanently remove logged entries on this device. Deletion cannot be undone.
+          </p>
+
+          <div className="segments" role="tablist" aria-label="Record type" style={{ margin: '12px 0' }}>
+            {DELETE_SCOPES.map((s) => (
+              <button
+                key={s.id}
+                role="tab"
+                aria-selected={delScope === s.id}
+                className={`segment ${delScope === s.id ? 'active' : ''}`}
+                onClick={() => {
+                  setDelScope(s.id);
+                  setDelConfirm(false);
+                }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="small muted" style={{ margin: '0 0 12px' }}>
+            {scopeRangeLabel(delStat)}
+          </p>
+
+          <div className="nav" style={{ flexWrap: 'wrap', marginBottom: delMode === 'before' || delMode === 'on' ? 10 : 14 }}>
+            {DELETE_MODES.map((m) => (
+              <button
+                key={m.id}
+                className={delMode === m.id ? 'primary' : ''}
+                onClick={() => {
+                  setDelMode(m.id);
+                  setDelConfirm(false);
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {(delMode === 'before' || delMode === 'on') && (
+            <div className="row" style={{ marginBottom: 14 }}>
+              <span className="muted small">
+                {delMode === 'before' ? 'Delete all entries before this date' : 'Delete entries on this date'}
+              </span>
+              <input
+                type="date"
+                value={delDate}
+                onChange={(e) => {
+                  setDelDate(e.target.value);
+                  setDelConfirm(false);
+                }}
+              />
+            </div>
+          )}
+
+          {delCount > 0 ? (
+            delConfirm ? (
+              <div className="row">
+                <span className="muted small" style={{ flex: 1 }}>
+                  Deletes {deleteActionLabel(delScope, delMode, delDate, delCount)}. This cannot be undone.
+                </span>
+                <button className="ghost" onClick={() => setDelConfirm(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    props.onDeleteRecords(delScope, delMode, delDate);
+                    setDelConfirm(false);
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            ) : (
+              <button className="danger" onClick={() => setDelConfirm(true)}>
+                Delete {delCount} record{delCount === 1 ? '' : 's'}
+              </button>
+            )
+          ) : (
+            <p className="muted small">Nothing to delete for the selected options.</p>
+          )}
         </div>
 
         {props.isDesktop && (

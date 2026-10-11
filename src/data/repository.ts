@@ -284,6 +284,26 @@ export interface LastSetHint {
   rir: number | null;
 }
 
+/** Record kinds that can be bulk-deleted by date range. */
+export type DeleteScope = 'nutrition' | 'training' | 'body';
+
+/** How a bulk deletion picks rows: everything, up-to-but-not-including a date,
+ *  exactly on a date, or the single most recent entry. */
+export type DeleteMode = 'all' | 'before' | 'on' | 'last';
+
+/** Per-scope record counts and date span, for the delete tool UI. */
+export interface ScopeStats {
+  count: number;
+  firstDate: string | null;
+  lastDate: string | null;
+}
+
+export interface RecordStats {
+  nutrition: ScopeStats;
+  training: ScopeStats;
+  body: ScopeStats;
+}
+
 export interface DataPort {
   getNutrientDefs(): NutrientDef[];
   getTargets(): Map<string, Milli>;
@@ -340,6 +360,10 @@ export interface DataPort {
   deleteRoutine(id: string): void;
   startWorkoutFromRoutine(routineId: string, localDate: string, tzOffsetMin?: number): string | null;
   getLastSetForExercise(exerciseId: string): LastSetHint | null;
+
+  getRecordStats(): RecordStats;
+  countRecords(scope: DeleteScope, mode: DeleteMode, date?: string): number;
+  deleteRecords(scope: DeleteScope, mode: DeleteMode, date?: string): number;
 }
 
 export class SqliteRepository implements DataPort {
@@ -1307,6 +1331,117 @@ export class SqliteRepository implements DataPort {
       [exerciseId],
     )[0];
     return r ? { loadG: r.load_g, reps: r.reps, rir: r.rir } : null;
+  }
+
+  // ── record lifecycle (bulk delete) ────────────────────────
+  private scopeTable(scope: DeleteScope): 'log_items' | 'workouts' | 'body_metrics' {
+    if (scope === 'nutrition') return 'log_items';
+    if (scope === 'training') return 'workouts';
+    return 'body_metrics';
+  }
+
+  private dateWhere(mode: Exclude<DeleteMode, 'last'>, date?: string): { where: string; params: unknown[] } {
+    if (mode === 'before') return { where: 'local_date < ?', params: [date] };
+    if (mode === 'on') return { where: 'local_date = ?', params: [date] };
+    return { where: '1=1', params: [] };
+  }
+
+  private lastRecordId(table: 'log_items' | 'workouts' | 'body_metrics'): string | null {
+    return (
+      this.rows<{ id: string }>(`SELECT id FROM ${table} ORDER BY created_at DESC, local_date DESC LIMIT 1`)[0]?.id ?? null
+    );
+  }
+
+  getRecordStats(): RecordStats {
+    const range = (table: 'log_items' | 'workouts' | 'body_metrics'): ScopeStats => {
+      const r = this.rows<{ c: number; f: string | null; l: string | null }>(
+        `SELECT COUNT(*) AS c, MIN(local_date) AS f, MAX(local_date) AS l FROM ${table}`,
+      )[0];
+      return { count: r?.c ?? 0, firstDate: r?.f ?? null, lastDate: r?.l ?? null };
+    };
+    return {
+      nutrition: range('log_items'),
+      training: range('workouts'),
+      body: range('body_metrics'),
+    };
+  }
+
+  countRecords(scope: DeleteScope, mode: DeleteMode, date?: string): number {
+    const table = this.scopeTable(scope);
+    if (mode === 'last') return this.lastRecordId(table) ? 1 : 0;
+    const { where, params } = this.dateWhere(mode, date);
+    return this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`, params)[0]?.n ?? 0;
+  }
+
+  deleteRecords(scope: DeleteScope, mode: DeleteMode, date?: string): number {
+    const table = this.scopeTable(scope);
+    const id = mode === 'last' ? this.lastRecordId(table) : null;
+    if (mode === 'last' && !id) return 0;
+
+    // Predicates applied to the scope table itself (unqualified column).
+    const where = mode === 'last' ? 'id = ?' : this.dateWhere(mode, date).where;
+    const params = mode === 'last' ? [id as string] : this.dateWhere(mode, date).params;
+    // Predicates applied to the workouts table inside JOINs (aliased as w).
+    const workoutsPred =
+      mode === 'last'
+        ? { sql: 'w.id = ?', params: [id as string] }
+        : {
+            sql: this.dateWhere(mode, date).where.replace('local_date', 'w.local_date'),
+            params: this.dateWhere(mode, date).params,
+          };
+
+    const count = this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`, params)[0]?.n ?? 0;
+    if (count === 0) return 0;
+
+    // sql.js persists via db.export(), which resets PRAGMA foreign_keys to OFF,
+    // so ON DELETE CASCADE cannot be relied on. Delete child rows explicitly.
+    this.db.run('BEGIN');
+    try {
+      if (scope === 'training') {
+        this.run(
+          `DELETE FROM personal_records WHERE set_id IN (
+             SELECT s.id FROM sets s
+             JOIN workout_exercises we ON we.id = s.workout_exercise_id
+             JOIN workouts w ON w.id = we.workout_id
+             WHERE ${workoutsPred.sql}
+           )`,
+          workoutsPred.params,
+        );
+        this.run(
+          `DELETE FROM sets WHERE workout_exercise_id IN (
+             SELECT we.id FROM workout_exercises we
+             JOIN workouts w ON w.id = we.workout_id
+             WHERE ${workoutsPred.sql}
+           )`,
+          workoutsPred.params,
+        );
+        this.run(
+          `DELETE FROM workout_exercises WHERE workout_id IN (
+             SELECT id FROM workouts WHERE ${where}
+           )`,
+          params,
+        );
+      } else if (scope === 'nutrition') {
+        this.run(
+          `DELETE FROM log_item_nutrients WHERE log_item_id IN (
+             SELECT id FROM log_items WHERE ${where}
+           )`,
+          params,
+        );
+      }
+      this.run(`DELETE FROM ${table} WHERE ${where}`, params);
+      if (scope === 'nutrition') {
+        this.run(
+          'DELETE FROM log_days WHERE NOT EXISTS (SELECT 1 FROM log_items WHERE log_items.local_date = log_days.local_date)',
+        );
+      }
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+    return count;
   }
 
   getWeeklyVolume(fromDate: string, toDate: string, secondaryFactor = 0.5): Map<string, number> {
