@@ -1,6 +1,8 @@
 /* ============================================================
    hypertroph+ — design system
-   Deep-green SaaS dashboard. Light + dark.
+   Restrained deep-green product UI. Light + dark.
+   Refined: flat surfaces, soft active states, consistent radii,
+   restrained shadows, capped content width.
    ============================================================ */
 
 :root {
@@ -17,15 +19,16 @@
   --green-900: #082b1e;
 
   /* surfaces */
-  --page: #f3f4f3;
+  --page: #f5f6f5;
   --surface: #ffffff;
-  --surface-2: #f5f7f6;
-  --line: #e8ebe9;
-  --line-strong: #d6dcd8;
+  --surface-2: #f4f6f5;
+  --line: #e9ecea;
+  --line-strong: #d9dedb;
 
   /* text */
-  --ink: #111413;
-  --muted: #8a8f8c;
+  --ink: #121614;
+  --muted: #5f6b66;
+  --faint: #8a938f;
 
   /* semantic */
   --amber: #b7791f;
@@ -35,16 +38,40 @@
   --blue: #2f6fb0;
   --blue-bg: #e9f1fa;
 
-  /* chips */
+  /* chips / soft accent */
   --chip-bg: var(--green-100);
   --chip-fg: var(--green-800);
 
-  /* geometry */
-  --radius: 16px;
-  --radius-lg: 22px;
-  --t: 160ms ease;
+  /* neutral track (bars, gauges) */
+  --track: #eaedeb;
+  --hover: var(--surface-2);
 
-  /* hatch fill for "remaining" parts */
+  /* type */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', 'Plus Jakarta Sans', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* geometry */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius: 10px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* elevation */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 20, 0.04);
+  --shadow-sm: 0 1px 3px rgba(16, 24, 20, 0.06), 0 1px 2px rgba(16, 24, 20, 0.04);
+  --shadow-md: 0 6px 20px rgba(16, 24, 20, 0.07), 0 1px 3px rgba(16, 24, 20, 0.05);
+  --shadow-lg: 0 24px 64px rgba(8, 30, 20, 0.22);
+
+  /* motion */
+  --t: 150ms ease;
+
+  /* layout */
+  --content-max: 1200px;
+  --sidebar-w: 248px;
+
+  /* hatch fill — legacy alias, kept for compatibility */
   --hatch-color: rgba(157, 176, 166, 0.5);
   --hatch-bg: #eff3f0;
 
@@ -72,7 +99,8 @@
   --line-strong: #2e4036;
 
   --ink: #eaf2ed;
-  --muted: #8b9a91;
+  --muted: #94a39b;
+  --faint: #748278;
 
   --amber: #e0a94a;
   --amber-bg: #322713;
@@ -83,6 +111,14 @@
 
   --chip-bg: rgba(92, 191, 143, 0.16);
   --chip-fg: #7fd0a8;
+
+  --track: #23332b;
+  --hover: var(--surface-2);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.55);
 
   --hatch-color: rgba(120, 150, 135, 0.35);
   --hatch-bg: #1a2620;
@@ -107,10 +143,11 @@ body,
 body {
   background: var(--page);
   color: var(--ink);
-  font-family: 'Plus Jakarta Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 h1,
@@ -118,22 +155,24 @@ h2,
 h3 {
   margin: 0;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
 button {
   font: inherit;
-  color: inherit;
+  color: var(--ink);
   background: var(--surface);
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  transition: background var(--t), border-color var(--t), color var(--t), transform var(--t);
+  box-shadow: var(--shadow-xs);
+  transition: background var(--t), border-color var(--t), color var(--t), box-shadow var(--t),
+    transform var(--t);
 }
 
 button:hover:not(:disabled) {
@@ -141,10 +180,15 @@ button:hover:not(:disabled) {
   border-color: var(--green-300);
 }
 
+button:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
 button.primary {
   background: var(--green-700);
   border-color: var(--green-700);
   color: #fff;
+  box-shadow: var(--shadow-xs);
 }
 
 button.primary:hover:not(:disabled) {
@@ -156,10 +200,11 @@ button.ghost {
   background: transparent;
   border-color: transparent;
   color: var(--muted);
+  box-shadow: none;
 }
 
 button.ghost:hover:not(:disabled) {
-  background: var(--green-050);
+  background: var(--hover);
   color: var(--ink);
   border-color: transparent;
 }
@@ -184,12 +229,12 @@ button.block {
 }
 
 button.small {
-  padding: 6px 12px;
+  padding: 5px 11px;
   font-size: 12px;
 }
 
 .icon-btn {
-  padding: 7px 10px;
+  padding: 7px 9px;
   font-size: 15px;
   line-height: 1;
 }
@@ -219,15 +264,15 @@ select {
   color: inherit;
   background: var(--surface-2);
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  padding: 8px 13px;
 }
 
 input:focus,
 select:focus {
   outline: none;
   border-color: var(--green-500);
-  box-shadow: 0 0 0 3px var(--green-100);
+  box-shadow: 0 0 0 3px var(--chip-bg);
 }
 
 svg {
@@ -253,19 +298,19 @@ svg {
 .content {
   flex: 1 1 auto;
   overflow: auto;
-  padding: 8px 24px 48px;
+  padding: 8px max(24px, calc((100% - var(--content-max)) / 2)) 56px;
   -webkit-overflow-scrolling: touch;
 }
 
 /* ── Sidebar ───────────────────────────────────────────────── */
 .sidebar {
-  flex: 0 0 248px;
-  width: 248px;
+  flex: 0 0 var(--sidebar-w);
+  width: var(--sidebar-w);
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 20px 16px;
+  gap: 4px;
+  padding: 18px 14px;
   background: var(--surface);
   border-right: 1px solid var(--line);
   overflow-y: auto;
@@ -276,23 +321,23 @@ svg {
   align-items: center;
   gap: 10px;
   font-weight: 800;
-  font-size: 18px;
+  font-size: 17px;
   letter-spacing: -0.02em;
 }
 
 .side-brand {
-  padding: 2px 8px 16px;
+  padding: 2px 8px 14px;
 }
 
 .logo-mark {
   width: 34px;
   height: 34px;
   flex: 0 0 34px;
-  border-radius: 50%;
+  border-radius: 9px;
   display: grid;
   place-items: center;
   color: #fff;
-  background: radial-gradient(circle at 32% 28%, var(--green-400), var(--green-700) 70%);
+  background: var(--green-700);
 }
 
 .logo-mark svg {
@@ -307,10 +352,10 @@ svg {
 .side-section-label {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted);
-  padding: 14px 12px 6px;
+  color: var(--faint);
+  padding: 14px 10px 6px;
 }
 
 .nav-list {
@@ -324,23 +369,24 @@ svg {
   width: 100%;
   justify-content: flex-start;
   gap: 12px;
-  padding: 11px 14px;
+  padding: 9px 12px;
   border: none;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
-  font-weight: 600;
+  font-weight: 500;
+  box-shadow: none;
 }
 
 .nav-item:hover:not(:disabled) {
-  background: var(--green-050);
+  background: var(--hover);
   color: var(--ink);
   border-color: transparent;
 }
 
 .nav-item.active {
   color: var(--ink);
-  font-weight: 700;
+  font-weight: 600;
   background: var(--green-050);
 }
 
@@ -351,12 +397,12 @@ svg {
 .nav-item.active::before {
   content: '';
   position: absolute;
-  left: -16px;
-  top: 9px;
-  bottom: 9px;
-  width: 4px;
-  border-radius: 0 4px 4px 0;
-  background: var(--green-700);
+  left: -14px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--green-600);
 }
 
 .nav-icon {
@@ -371,38 +417,28 @@ svg {
 
 .nav-badge {
   margin-left: auto;
-  background: var(--green-700);
-  color: #fff;
+  background: var(--chip-bg);
+  color: var(--chip-fg);
   font-size: 11px;
   font-weight: 700;
-  border-radius: 999px;
-  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
 }
 
 .promo {
   margin-top: auto;
-  border-radius: 20px;
-  padding: 18px;
+  border-radius: var(--radius-md);
+  padding: 16px;
   color: #fff;
-  background: linear-gradient(150deg, var(--green-500), var(--green-800) 70%, var(--green-900));
+  background: var(--green-800);
   position: relative;
   overflow: hidden;
-}
-
-.promo::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(120px 60px at 90% 110%, rgba(92, 191, 143, 0.55), transparent 70%),
-    radial-gradient(90px 50px at 10% -10%, rgba(255, 255, 255, 0.12), transparent 70%);
-  pointer-events: none;
 }
 
 .promo h4 {
   position: relative;
   margin: 0 0 4px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -410,7 +446,8 @@ svg {
   position: relative;
   margin: 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 /* ── Topbar ────────────────────────────────────────────────── */
@@ -418,23 +455,25 @@ svg {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 14px 24px 0;
-  padding: 10px 14px;
+  margin: 14px max(24px, calc((100% - var(--content-max)) / 2)) 0;
+  padding: 8px 10px 8px 14px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
 }
 
 .search-pill {
   flex: 1 1 auto;
-  max-width: 460px;
+  max-width: 440px;
   justify-content: flex-start;
   gap: 10px;
   color: var(--muted);
   background: var(--surface-2);
   border-color: transparent;
   font-weight: 500;
-  padding: 10px 16px;
+  box-shadow: none;
+  padding: 9px 14px;
 }
 
 .search-pill:hover:not(:disabled) {
@@ -461,8 +500,9 @@ svg {
   display: grid;
   place-items: center;
   font-weight: 700;
+  font-size: 13px;
   color: #fff;
-  background: linear-gradient(140deg, var(--green-400), var(--green-800));
+  background: var(--green-700);
 }
 
 .spacer {
@@ -470,11 +510,11 @@ svg {
 }
 
 .kbd {
-  font-family: ui-monospace, 'SFMono-Regular', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--muted);
   border: 1px solid var(--line-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   padding: 1px 6px;
   white-space: nowrap;
 }
@@ -492,17 +532,17 @@ button.primary .kbd {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding: 22px 4px 4px;
+  padding: 24px 4px 4px;
 }
 
 .page-title {
-  font-size: 30px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 .page-sub {
-  margin: 4px 0 0;
+  margin: 5px 0 0;
   color: var(--muted);
   font-size: 14px;
 }
@@ -517,11 +557,11 @@ button.primary .kbd {
 .date-nav {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 4px;
+  border-radius: var(--radius-sm);
+  padding: 3px;
 }
 
 .date-label {
@@ -535,7 +575,7 @@ button.primary .kbd {
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
   margin-top: 16px;
 }
 
@@ -544,49 +584,56 @@ button.primary .kbd {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 138px;
-  padding: 20px;
+  min-height: 134px;
+  padding: 18px;
   border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
   background: var(--surface);
+  box-shadow: var(--shadow-xs);
 }
 
 .kpi.featured {
   color: #fff;
-  background: linear-gradient(135deg, var(--green-400) -15%, var(--green-700) 55%, var(--green-900) 120%);
+  border-color: transparent;
+  background: var(--green-700);
+  box-shadow: var(--shadow-sm);
 }
 
 .kpi-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--muted);
   padding-right: 40px;
 }
 
 .kpi.featured .kpi-label {
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .kpi-action {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 34px;
-  height: 34px;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border-radius: 50%;
   justify-content: center;
   color: var(--ink);
   background: var(--surface);
   border: 1px solid var(--line);
+  box-shadow: var(--shadow-xs);
 }
 
 .kpi.featured .kpi-action {
-  background: #fff;
+  background: rgba(255, 255, 255, 0.16);
   border-color: transparent;
-  color: var(--green-700);
+  color: #fff;
+  box-shadow: none;
 }
 
 .kpi.featured .kpi-action:hover:not(:disabled) {
-  background: var(--green-050);
+  background: rgba(255, 255, 255, 0.26);
   border-color: transparent;
 }
 
@@ -597,25 +644,26 @@ button.primary .kbd {
 
 .kpi-value {
   margin-top: auto;
-  font-size: 40px;
-  font-weight: 800;
+  font-size: 36px;
+  font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .kpi-value small {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
-  opacity: 0.66;
+  opacity: 0.62;
   letter-spacing: 0;
 }
 
 .kpi-chip {
   align-self: flex-start;
-  border-radius: 999px;
-  padding: 4px 11px;
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   background: var(--chip-bg);
   color: var(--chip-fg);
 }
@@ -629,14 +677,14 @@ button.primary .kbd {
 .dash {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
   margin-top: 16px;
   align-items: start;
 }
 
 .grid {
   display: grid;
-  gap: 16px;
+  gap: 14px;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
 
@@ -646,13 +694,14 @@ button.primary .kbd {
 
 .card {
   background: var(--surface);
-  border: 1px solid transparent;
+  border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  padding: 22px;
+  padding: 20px;
+  box-shadow: var(--shadow-xs);
 }
 
 .card h3 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
 }
 
@@ -665,39 +714,34 @@ button.primary .kbd {
 }
 
 .card-head h3 {
-  font-size: 16px;
+  font-size: 15px;
 }
 
-/* ── Pill bars (hatched track, solid fill) ─────────────────── */
+/* ── Pill bars (flat track, solid fill) ────────────────────── */
 .pill-bar,
 .bar {
-  height: 12px;
-  border-radius: 999px;
+  height: 10px;
+  border-radius: var(--radius-pill);
   overflow: hidden;
   margin: 6px 0 2px;
-  background-color: var(--hatch-bg);
-  background-image: repeating-linear-gradient(
-    45deg,
-    var(--hatch-color) 0 2px,
-    transparent 2px 9px
-  );
+  background: var(--track);
 }
 
 .pill-bar > span,
 .bar > div {
   display: block;
   height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--green-400), var(--green-700));
+  border-radius: var(--radius-pill);
+  background: var(--green-600);
   transition: width 300ms ease;
 }
 
 .bar.protein > div {
-  background: linear-gradient(90deg, var(--green-300), var(--green-500));
+  background: var(--green-500);
 }
 
 .bar.fat > div {
-  background: linear-gradient(90deg, var(--amber), #d8a23e);
+  background: var(--amber);
 }
 
 .bar-list {
@@ -728,7 +772,7 @@ button.primary .kbd {
 
 .mono {
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .nav {
@@ -746,7 +790,8 @@ button.primary .kbd {
   text-align: left;
   border: none;
   background: transparent;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
 }
 
 .list-row + .list-row {
@@ -754,7 +799,7 @@ button.primary .kbd {
 }
 
 button.list-row:hover:not(:disabled) {
-  background: var(--green-050);
+  background: var(--hover);
   border-color: transparent;
 }
 
@@ -773,7 +818,7 @@ button.list-row:hover:not(:disabled) {
   width: 16px;
   height: 16px;
   flex: 0 0 16px;
-  color: var(--muted);
+  color: var(--faint);
 }
 
 .list-row strong {
@@ -788,7 +833,7 @@ button.list-row:hover:not(:disabled) {
   width: 38px;
   height: 38px;
   flex: 0 0 38px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   display: grid;
   place-items: center;
   color: #fff;
@@ -808,8 +853,8 @@ button.list-row:hover:not(:disabled) {
 }
 
 .icon-tile.soft {
-  background: var(--green-100);
-  color: var(--green-700);
+  background: var(--chip-bg);
+  color: var(--chip-fg);
 }
 
 .icon-tile svg {
@@ -822,15 +867,15 @@ button.list-row:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 3px 10px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .status-chip.done {
-  background: var(--green-100);
-  color: var(--green-800);
+  background: var(--chip-bg);
+  color: var(--chip-fg);
 }
 
 .status-chip.prog {
@@ -839,13 +884,13 @@ button.list-row:hover:not(:disabled) {
 }
 
 .status-chip.miss {
-  background: var(--red-bg);
-  color: var(--red);
+  background: var(--surface-2);
+  color: var(--muted);
 }
 
 .tag {
   font-size: 11px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 2px 9px;
   color: var(--muted);
   background: var(--surface-2);
@@ -879,10 +924,11 @@ button.list-row:hover:not(:disabled) {
 
 .gauge-val {
   display: block;
-  font-size: 34px;
-  font-weight: 800;
+  font-size: 32px;
+  font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .gauge-label {
@@ -898,21 +944,14 @@ button.list-row:hover:not(:disabled) {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius-lg);
-  padding: 22px;
+  padding: 20px;
   color: #fff;
-  background: linear-gradient(150deg, var(--green-600), var(--green-900));
+  background: var(--green-800);
   display: flex;
   flex-direction: column;
   gap: 14px;
-  min-height: 200px;
-}
-
-.timer-card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(140px 80px at 100% 110%, rgba(92, 191, 143, 0.5), transparent 70%);
-  pointer-events: none;
+  min-height: 196px;
+  box-shadow: var(--shadow-sm);
 }
 
 .timer-card h3,
@@ -925,15 +964,15 @@ button.list-row:hover:not(:disabled) {
 .timer-card h3 {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .timer-value {
   margin-top: auto;
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-  font-size: 42px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-family: var(--font-mono);
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   line-height: 1;
 }
 
@@ -943,13 +982,14 @@ button.list-row:hover:not(:disabled) {
 }
 
 .timer-btn {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.14);
   border-color: transparent;
   color: #fff;
+  box-shadow: none;
 }
 
 .timer-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.26);
   border-color: transparent;
 }
 
@@ -998,9 +1038,9 @@ button.list-row:hover:not(:disabled) {
 .meal-index {
   font-size: 12px;
   font-weight: 700;
-  color: var(--green-800);
-  background: var(--green-100);
-  border-radius: 999px;
+  color: var(--chip-fg);
+  background: var(--chip-bg);
+  border-radius: var(--radius-pill);
   padding: 2px 10px;
   letter-spacing: 0.03em;
 }
@@ -1035,7 +1075,7 @@ button.list-row:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 18px;
+  padding: 16px;
   border: 1px solid var(--line);
   background: var(--surface-2);
   border-radius: var(--radius);
@@ -1069,8 +1109,8 @@ button.list-row:hover:not(:disabled) {
 .palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(8, 20, 14, 0.5);
-  backdrop-filter: blur(2px);
+  background: rgba(8, 20, 14, 0.45);
+  backdrop-filter: blur(3px);
   display: flex;
   justify-content: center;
   padding-top: 12vh;
@@ -1086,7 +1126,7 @@ button.list-row:hover:not(:disabled) {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: 0 24px 70px rgba(8, 30, 20, 0.28);
+  box-shadow: var(--shadow-lg);
 }
 
 .palette input {
@@ -1096,6 +1136,7 @@ button.list-row:hover:not(:disabled) {
   padding: 15px 18px;
   font-size: 15px;
   background: transparent;
+  box-shadow: none;
 }
 
 .palette input:focus {
@@ -1106,9 +1147,9 @@ button.list-row:hover:not(:disabled) {
 .section-label {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--faint);
   padding: 10px 14px 4px;
 }
 
@@ -1155,26 +1196,28 @@ button.list-row:hover:not(:disabled) {
   border: none;
   background: transparent;
   color: var(--muted);
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
-  padding: 8px 14px;
-  border-radius: 999px;
+  padding: 7px 13px;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
 }
 
 .palette-tab:hover {
   color: var(--ink);
-  background: var(--surface-2);
+  background: var(--hover);
   border-color: transparent;
 }
 
 .palette-tab.active {
-  color: #fff;
-  background: var(--green-700);
+  color: var(--chip-fg);
+  background: var(--chip-bg);
+  font-weight: 600;
 }
 
 .palette-tab.active:hover {
-  background: var(--green-700);
-  color: #fff;
+  background: var(--chip-bg);
+  color: var(--chip-fg);
 }
 
 .facet-bar {
@@ -1199,7 +1242,7 @@ button.list-row:hover:not(:disabled) {
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--faint);
   padding-top: 6px;
 }
 
@@ -1213,10 +1256,11 @@ button.list-row:hover:not(:disabled) {
   border: 1px solid var(--line-strong);
   background: var(--surface);
   color: var(--muted);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 3px 11px;
   font-size: 12px;
   line-height: 1.6;
+  box-shadow: none;
 }
 
 .chip:hover:not(:disabled) {
@@ -1226,9 +1270,9 @@ button.list-row:hover:not(:disabled) {
 }
 
 .chip.active {
-  background: var(--green-700);
-  border-color: var(--green-700);
-  color: #fff;
+  background: var(--chip-bg);
+  border-color: var(--green-300);
+  color: var(--chip-fg);
   font-weight: 600;
 }
 
@@ -1245,6 +1289,7 @@ button.list-row:hover:not(:disabled) {
   color: var(--green-700);
   font-size: 12px;
   padding: 2px 0;
+  box-shadow: none;
 }
 
 .sort-row {
@@ -1290,11 +1335,12 @@ button.list-row:hover:not(:disabled) {
   flex: 0 0 auto;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--faint);
   font-size: 16px;
   line-height: 1;
   align-self: center;
   padding: 4px;
+  box-shadow: none;
 }
 
 .star.on {
@@ -1310,23 +1356,24 @@ button.list-row:hover:not(:disabled) {
 /* ── Segmented control ─────────────────────────────────────── */
 .segments {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 4px;
+  border-radius: var(--radius-sm);
+  padding: 3px;
 }
 
 .segment {
   flex: 1;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border: none;
   background: transparent;
-  border-radius: 9px;
+  border-radius: var(--radius-xs);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--muted);
   justify-content: center;
+  box-shadow: none;
 }
 
 .segment:hover:not(:disabled) {
@@ -1336,13 +1383,14 @@ button.list-row:hover:not(:disabled) {
 }
 
 .segment.active {
-  background: var(--green-700);
-  color: #fff;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-xs);
 }
 
 .segment.active:hover {
-  background: var(--green-700);
-  color: #fff;
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .segment-bar {
@@ -1384,7 +1432,7 @@ button.list-row:hover:not(:disabled) {
 
 .builder-row {
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   background: var(--surface-2);
 }
@@ -1445,11 +1493,11 @@ button.list-row:hover:not(:disabled) {
   right: 22px;
   background: var(--ink);
   color: var(--page);
-  border-radius: 14px;
-  padding: 13px 18px;
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
   font-weight: 600;
   z-index: 20;
-  box-shadow: 0 12px 34px rgba(8, 30, 20, 0.3);
+  box-shadow: var(--shadow-lg);
 }
 
 /* ── Bottom tab bar (mobile only) ──────────────────────────── */
@@ -1530,6 +1578,7 @@ button.list-row:hover:not(:disabled) {
     color: var(--muted);
     font-size: 11px;
     font-weight: 600;
+    box-shadow: none;
   }
 
   .tabbar button:hover:not(:disabled) {

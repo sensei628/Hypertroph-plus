@@ -1062,13 +1062,7 @@ function Gauge({ pct, label }: { pct: number; label: string }) {
   return (
     <div className="gauge">
       <svg viewBox="0 0 200 120" role="img" aria-label={`${Math.round(clamped)} percent of daily goal`}>
-        <defs>
-          <pattern id="gaugeHatch" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-            <rect width="8" height="8" fill="var(--hatch-bg)" />
-            <line x1="0" y1="0" x2="0" y2="8" stroke="var(--hatch-color)" strokeWidth="2" />
-          </pattern>
-        </defs>
-        <path d={path} fill="none" stroke="url(#gaugeHatch)" strokeWidth="16" strokeLinecap="round" />
+        <path d={path} fill="none" stroke="var(--track)" strokeWidth="16" strokeLinecap="round" />
         <path
           d={path}
           fill="none"
