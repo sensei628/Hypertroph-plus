@@ -3,8 +3,10 @@
 //   • navigations: network-first, fall back to the cached shell.
 //   • same-origin GETs (hashed assets, wasm, ref pack): stale-while-revalidate.
 // Bump CACHE when the shell changes so old caches are dropped on activate.
-const CACHE = 'hypertroph-plus-v1';
-const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-maskable.svg'];
+const CACHE = 'hypertroph-plus-v2';
+// Relative paths so the worker works both at a domain root and under a
+// subpath (e.g. a GitHub Pages project site at /<repo>/).
+const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-maskable.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -33,10 +35,10 @@ self.addEventListener('fetch', (event) => {
       fetch(req)
         .then((res) => {
           const copy = res.clone();
-          caches.open(CACHE).then((cache) => cache.put('/index.html', copy));
+          caches.open(CACHE).then((cache) => cache.put('./index.html', copy));
           return res;
         })
-        .catch(() => caches.match('/index.html').then((r) => r || caches.match('/'))),
+        .catch(() => caches.match('./index.html').then((r) => r || caches.match('./'))),
     );
     return;
   }
