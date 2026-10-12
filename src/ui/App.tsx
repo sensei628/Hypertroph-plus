@@ -56,6 +56,7 @@ import {
 } from '../domain/energy';
 import { gToKg, gToLb, kgToG, lbToG, e1rmG } from '../domain/training';
 import { addDaysISO, dailySeries, recentWeekStarts, sumByWeek, mean, macroEnergySplit, shortLabel } from '../domain/stats';
+import { checkForUpdate, type UpdateCheck } from '../domain/updates';
 import { BarChart, LineChart, StackedBar, Ring } from './charts';
 import { CommandPalette } from './CommandPalette';
 
@@ -186,8 +187,11 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
 
   const desktop = getDesktopBridge();
-  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(
+    typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : null,
+  );
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [webUpdate, setWebUpdate] = useState<UpdateCheck | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -317,12 +321,41 @@ export function App() {
   }, [desktop]);
 
   const handleCheckUpdates = useCallback(() => {
-    if (!desktop) return;
+    if (desktop) {
+      setUpdate({ state: 'checking' });
+      void desktop.checkForUpdates().then((r) => {
+        if (!r.ok) setUpdate({ state: 'error', message: r.reason ?? 'updates unavailable' });
+      });
+      return;
+    }
+    setWebUpdate(null);
     setUpdate({ state: 'checking' });
-    void desktop.checkForUpdates().then((r) => {
-      if (!r.ok) setUpdate({ state: 'error', message: r.reason ?? 'updates unavailable' });
+    void checkForUpdate(appVersion ?? '0.0.0').then((r) => {
+      if (!r) {
+        setUpdate({ state: 'error', message: 'could not reach the release server' });
+        return;
+      }
+      setWebUpdate(r);
+      setUpdate(r.hasUpdate ? { state: 'available', version: r.latest, notes: r.notes } : { state: 'not-available' });
+      if (r.hasUpdate) setToast(`Update ${r.latest} available — see Settings → App updates`);
     });
-  }, [desktop]);
+  }, [desktop, appVersion]);
+
+  // Web/mobile: quietly check once per session so the user is told what changed
+  // when a newer release is published. Never blocks or breaks startup.
+  useEffect(() => {
+    if (desktop || !appVersion) return;
+    const t = setTimeout(() => {
+      void checkForUpdate(appVersion).then((r) => {
+        if (r?.hasUpdate) {
+          setWebUpdate(r);
+          setUpdate({ state: 'available', version: r.latest, notes: r.notes });
+          setToast(`Update ${r.latest} available — see Settings → App updates`);
+        }
+      });
+    }, 6000);
+    return () => clearTimeout(t);
+  }, [desktop, appVersion]);
 
   const handleDeleteRecords = useCallback(
     (scope: DeleteScope, mode: DeleteMode, date?: string): number => {
@@ -895,6 +928,7 @@ export function App() {
               isDesktop={!!desktop}
               appVersion={appVersion}
               update={update}
+              webUpdate={webUpdate}
               onCheckUpdates={handleCheckUpdates}
             />
           )}
@@ -2765,6 +2799,7 @@ function Settings(props: {
   isDesktop: boolean;
   appVersion: string | null;
   update: UpdateStatus | null;
+  webUpdate: UpdateCheck | null;
   onCheckUpdates: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -2779,6 +2814,19 @@ function Settings(props: {
     const c = props.onCountDelete(delScope, delMode, delDate);
     setDelCount(c);
   }, [props, delScope, delMode, delDate]);
+
+  const webAvailable = !props.isDesktop && !!props.webUpdate?.hasUpdate;
+  const changelog =
+    props.update && (props.update.state === 'available' || props.update.state === 'downloaded')
+      ? props.update.notes ?? ''
+      : props.webUpdate?.hasUpdate
+        ? props.webUpdate.notes
+        : '';
+  const changelogVersion =
+    props.update && (props.update.state === 'available' || props.update.state === 'downloaded')
+      ? props.update.version
+      : props.webUpdate?.latest ?? '';
+
   return (
     <>
       <PageHead title="Settings" subtitle="Preferences, daily targets and local backups" />
@@ -2969,35 +3017,64 @@ function Settings(props: {
           )}
         </div>
 
-        {props.isDesktop && (
-          <div className="card">
-            <h3>App updates</h3>
-            <p className="small muted">
-              {props.appVersion ? `hypertroph+ ${props.appVersion}. ` : ''}
-              Updates download automatically and install the next time you quit. You can also check now.
-            </p>
-            <div className="nav" style={{ marginTop: 10 }}>
-              <button
-                onClick={props.onCheckUpdates}
-                disabled={props.update?.state === 'checking' || props.update?.state === 'downloading'}
-              >
-                {props.update?.state === 'checking' ? 'Checking…' : 'Check for updates'}
-              </button>
-            </div>
-            {props.update && <p className="small muted" style={{ marginTop: 8 }}>{describeUpdate(props.update)}</p>}
+        <div className="card">
+          <h3>App updates</h3>
+          <div className="row">
+            <span className="muted small">Installed version</span>
+            <span className="mono">{props.appVersion ?? 'unknown'}</span>
           </div>
-        )}
+          <p className="small muted" style={{ marginTop: 8 }}>
+            {props.isDesktop
+              ? 'Updates download automatically and install the next time you quit. You can also check now.'
+              : 'Check for a newer published version. When one is available, reload to apply it.'}
+          </p>
+          <div className="nav" style={{ marginTop: 10 }}>
+            <button
+              onClick={props.onCheckUpdates}
+              disabled={props.update?.state === 'checking' || props.update?.state === 'downloading'}
+            >
+              {props.update?.state === 'checking' ? 'Checking…' : 'Check for updates'}
+            </button>
+            {webAvailable && (
+              <button className="primary" onClick={() => window.location.reload()}>
+                Reload to update
+              </button>
+            )}
+            {!props.isDesktop && (props.webUpdate?.installerUrl || props.webUpdate?.htmlUrl) && (
+              <button
+                onClick={() =>
+                  window.open(props.webUpdate!.installerUrl || props.webUpdate!.htmlUrl, '_blank', 'noopener')
+                }
+              >
+                {props.webUpdate?.installerUrl ? 'Download desktop app' : 'Release notes'}
+              </button>
+            )}
+          </div>
+          {props.update && (
+            <p className="small muted" style={{ marginTop: 8 }}>
+              {describeUpdate(props.update, props.isDesktop)}
+            </p>
+          )}
+          {changelog && (
+            <div className="changelog">
+              <div className="changelog-title">What’s changed in {changelogVersion}</div>
+              <div className="changelog-body">{changelog}</div>
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
 }
 
-function describeUpdate(u: UpdateStatus): string {
+function describeUpdate(u: UpdateStatus, isDesktop: boolean): string {
   switch (u.state) {
     case 'checking':
       return 'Checking for updates…';
     case 'available':
-      return `Update ${u.version} found — downloading…`;
+      return isDesktop
+        ? `Update ${u.version} found — downloading…`
+        : `Update ${u.version} is available.`;
     case 'downloading':
       return `Downloading update… ${u.percent}%`;
     case 'downloaded':

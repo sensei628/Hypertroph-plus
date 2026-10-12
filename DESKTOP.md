@@ -35,8 +35,11 @@ and UI are identical. Only the shell around the web bundle differs.
    traversal outside `dist/` is rejected.
 3. **Auto-update** (`electron/main.cjs` + `electron-builder.yml`): described
    below.
-4. **Settings UI**: a desktop-only **App updates** card shows the version,
-   update status, and a manual *Check for updates* button.
+4. **Settings UI**: an **App updates** card (shown on every platform) reports the
+   installed version, streams update status, shows the **changelog ("what's
+   changed")** for the newest release, and offers a manual *Check for updates*
+   button. On desktop it drives `electron-updater`; on web/mobile it queries the
+   GitHub Releases API and offers *Reload to update* / a download link.
 5. **Service worker**: registration is skipped in the desktop shell (assets are
    local; a SW would only add cache-staleness risk).
 

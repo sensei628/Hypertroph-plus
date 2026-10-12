@@ -96,6 +96,20 @@ function sendUpdateStatus(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update-status', payload);
 }
 
+// electron-updater exposes release notes as a markdown string, or as an array of
+// { version, note } entries for a ranged update. Flatten either into plain text.
+function normalizeNotes(releaseNotes) {
+  if (!releaseNotes) return '';
+  if (typeof releaseNotes === 'string') return releaseNotes;
+  if (Array.isArray(releaseNotes)) {
+    return releaseNotes
+      .map((n) => (n && typeof n === 'object' ? n.note : String(n ?? '')))
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
+}
+
 // Auto-update: download in the background, install on quit. `publish` in
 // electron-builder.yml points at this repo's GitHub Releases, which is where
 // the app looks for new versions after install.
@@ -110,10 +124,22 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.on('checking-for-update', () => sendUpdateStatus({ state: 'checking' }));
-  autoUpdater.on('update-available', (info) => sendUpdateStatus({ state: 'available', version: info?.version ?? '' }));
+  autoUpdater.on('update-available', (info) =>
+    sendUpdateStatus({
+      state: 'available',
+      version: info?.version ?? '',
+      notes: normalizeNotes(info?.releaseNotes),
+    }),
+  );
   autoUpdater.on('update-not-available', (info) => sendUpdateStatus({ state: 'not-available', version: info?.version }));
   autoUpdater.on('download-progress', (p) => sendUpdateStatus({ state: 'downloading', percent: Math.round(p?.percent ?? 0) }));
-  autoUpdater.on('update-downloaded', (info) => sendUpdateStatus({ state: 'downloaded', version: info?.version ?? '' }));
+  autoUpdater.on('update-downloaded', (info) =>
+    sendUpdateStatus({
+      state: 'downloaded',
+      version: info?.version ?? '',
+      notes: normalizeNotes(info?.releaseNotes),
+    }),
+  );
   autoUpdater.on('error', (err) => sendUpdateStatus({ state: 'error', message: String(err?.message || err) }));
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch(() => {

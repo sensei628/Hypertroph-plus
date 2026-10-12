@@ -871,6 +871,30 @@ button.primary .kbd {
   padding: 6px 0;
 }
 
+/* ── Update changelog ──────────────────────────────────────── */
+.changelog {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.changelog-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+}
+
+.changelog-body {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--surface-2, rgba(0, 0, 0, 0.03));
+  border-radius: 8px;
+  padding: 10px;
+}
+
 /* ── Maintenance calibration ───────────────────────────────── */
 .calib {
   margin-top: 16px;

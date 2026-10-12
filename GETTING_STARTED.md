@@ -3,6 +3,8 @@
 One page to answer "where is this project, and how do I actually run it?".
 For deeper detail see [`README.md`](./README.md), [`MOBILE.md`](./MOBILE.md),
 [`DESKTOP.md`](./DESKTOP.md), and [`DATA_LICENSES.md`](./DATA_LICENSES.md).
+To install the app on your own devices (and update it), see
+[`guide-to-desktop-download.md`](./guide-to-desktop-download.md).
 
 hypertroph+ is an **offline-first nutrition + hypertrophy training tracker**.
 There is **one codebase** (`src/`) shared by every target:

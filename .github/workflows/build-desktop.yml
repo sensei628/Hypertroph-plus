@@ -32,6 +32,16 @@ jobs:
       - name: Package
         run: npx electron-builder --win --publish never
 
+      - name: Verify update manifest
+        shell: bash
+        run: |
+          if [ ! -f release/latest.yml ]; then
+            echo "::error::electron-builder did not produce release/latest.yml — auto-update would break."
+            exit 1
+          fi
+          echo "latest.yml present:"
+          cat release/latest.yml
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -48,4 +58,5 @@ jobs:
           files: |
             release/*.exe
             release/*.yml
+          generate_release_notes: true
           fail_on_unmatched_files: false

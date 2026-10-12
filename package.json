@@ -30,7 +30,8 @@
     "mobile:ios": "npm run build && cap sync ios && cap open ios",
     "desktop:start": "npm run build && electron .",
     "desktop:dist": "npm run build && electron-builder --win --publish never",
-    "desktop:release": "npm run build && electron-builder --win --publish always"
+    "desktop:release": "npm run build && electron-builder --win --publish always",
+    "release": "node tools/release.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",
