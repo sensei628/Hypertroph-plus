@@ -31,7 +31,8 @@
     "desktop:start": "npm run build && electron .",
     "desktop:dist": "npm run build && electron-builder --win --publish never",
     "desktop:release": "npm run build && electron-builder --win --publish always",
-    "release": "node tools/release.mjs"
+    "release": "node tools/release.mjs",
+    "changelog": "node tools/changelog.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",

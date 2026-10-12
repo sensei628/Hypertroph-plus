@@ -18,6 +18,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -42,13 +44,21 @@ jobs:
           echo "latest.yml present:"
           cat release/latest.yml
 
+      - name: Build release changelog
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          node tools/changelog.mjs --to "${GITHUB_REF_NAME}" > CHANGELOG_RELEASE.md
+          echo "----- release body -----"
+          cat CHANGELOG_RELEASE.md
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: hypertroph-desktop-windows
           path: |
             release/*.exe
-            release/*.yml
+            release/latest.yml
           if-no-files-found: error
 
       - name: Attach to release
@@ -57,6 +67,6 @@ jobs:
         with:
           files: |
             release/*.exe
-            release/*.yml
-          generate_release_notes: true
+            release/latest.yml
+          body_path: CHANGELOG_RELEASE.md
           fail_on_unmatched_files: false

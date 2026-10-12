@@ -110,7 +110,8 @@ triggers CI, which:
 - builds the **Windows installer + `latest.yml`** (the auto-update manifest) and
   the **Android APK/AAB**, and
 - attaches them to the matching **GitHub Release**, with **release notes
-  generated from the commits** — those notes are exactly what the app shows as
+  generated from the commits** (grouped into Features / Fixes / Performance /
+  … by `tools/changelog.mjs`) — those notes are exactly what the app shows as
   "what's changed".
 
 Watch progress in the **Actions** tab; grab the result from **Releases**.

@@ -74,7 +74,10 @@ The desktop app is designed to update itself after it has been installed:
 
 1. CI (`.github/workflows/build-desktop.yml`) builds the installer and, on a
    `v*` tag, publishes it to **GitHub Releases** together with `latest.yml`
-   (the update manifest `electron-updater` reads).
+   (the update manifest `electron-updater` reads). The release **body** — the
+   changelog the app shows as "what's changed" — is generated from the
+   conventional-commit history by `tools/changelog.mjs` (`npm run changelog`),
+   grouped into Features/Fixes/Performance/etc.
 2. A running app checks the configured release channel shortly after launch
    (`publish` in `electron-builder.yml` → `sensei628/Hypertroph-plus`).
 3. On a new version it **auto-downloads in the background** and shows progress
@@ -133,6 +136,7 @@ build artifacts.
 | Auto-update into already-installed apps | ✅ (code + CI; needs a `v*` tag release) |
 | Manual "check for updates" in Settings | ✅ |
 | CI producing installers + update manifest | ✅ |
+| Release changelog generated from commits | ✅ (`tools/changelog.mjs`) |
 | Code signing / notarization | ⚠️ deferred (needs certificates) |
 | Custom app icon | ⚠️ deferred |
 
