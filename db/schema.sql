@@ -288,11 +288,51 @@ CREATE TABLE IF NOT EXISTS preferences (
   updated_at INTEGER NOT NULL
 );
 
+-- Saved nutrition plans (versioned; one may be active). Every plan keeps the
+-- inputs AND the computed output so an old plan is reproducible even if the
+-- estimation formulas evolve. Applying a plan writes the daily `targets` rows.
+CREATE TABLE IF NOT EXISTS nutrition_plans (
+  id                TEXT PRIMARY KEY,
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL,
+  is_active         INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0,1)),
+  sex               TEXT NOT NULL CHECK (sex IN ('male','female')),
+  age               INTEGER NOT NULL,
+  height_cm         REAL NOT NULL,
+  weight_kg         REAL NOT NULL,
+  activity          TEXT NOT NULL,
+  goal              TEXT NOT NULL,
+  rate_kg_per_week  REAL NOT NULL DEFAULT 0,
+  protein_per_kg    REAL NOT NULL,
+  fat_per_kg        REAL,
+  fat_percent       REAL NOT NULL,
+  bmr_kcal          INTEGER NOT NULL,
+  tdee_kcal         INTEGER NOT NULL,
+  target_kcal       INTEGER NOT NULL,
+  protein_g         INTEGER NOT NULL,
+  fat_g             INTEGER NOT NULL,
+  carb_g            INTEGER NOT NULL,
+  notes             TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_nutrition_plans_active ON nutrition_plans(is_active);
+
+-- Append-only log of daily-target changes, so past targets stay comparable with
+-- the logs recorded against them. `source` records what set the value.
+CREATE TABLE IF NOT EXISTS target_history (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  nutrient_id    TEXT NOT NULL REFERENCES nutrients(id),
+  target_milli   INTEGER,
+  effective_from TEXT NOT NULL,
+  source         TEXT NOT NULL CHECK (source IN ('manual','plan','seed')),
+  created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_target_history ON target_history(nutrient_id, effective_from);
+
 -- Body measurements are their own data category (NOT exercises): weight,
 -- height, body-fat %, waist. Timeseries keyed by local date.
 CREATE TABLE IF NOT EXISTS body_metrics (
   id          TEXT PRIMARY KEY,
-  metric_type TEXT NOT NULL CHECK (metric_type IN ('weight_kg','height_cm','body_fat_pct','waist_cm','other')),
+  metric_type TEXT NOT NULL CHECK (metric_type IN ('weight_kg','height_cm','body_fat_pct','neck_cm','chest_cm','waist_cm','hips_cm','thigh_cm','arm_cm','calf_cm','other')),
   value       REAL NOT NULL,
   local_date  TEXT NOT NULL,
   note        TEXT,

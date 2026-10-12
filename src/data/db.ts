@@ -267,6 +267,113 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_we_workout ON workout_exercises(workout_id);
     `,
   },
+  {
+    // Micronutrient catalogue. The base model shipped only energy, the four
+    // macros, fiber, sugar and sodium; the USDA reference pack actually carries
+    // dozens more (fatty acids, vitamins, minerals) but they were being dropped
+    // by the importer. This registers the additional nutrient definitions so
+    // reference foods can surface them. Idempotent (INSERT OR IGNORE): fresh
+    // databases already get these rows from db/seed.sql. Existing log snapshots
+    // are untouched; new logs simply carry more nutrients.
+    version: 8,
+    sql: `
+      INSERT OR IGNORE INTO nutrients (id, name, unit, kind, display_order, targetable) VALUES
+        ('fat_saturated_g',    'Saturated fat',        'g',  'fatty_acid', 10, 1),
+        ('fat_mono_g',         'Monounsaturated fat',  'g',  'fatty_acid', 11, 0),
+        ('fat_poly_g',         'Polyunsaturated fat',  'g',  'fatty_acid', 12, 0),
+        ('fat_trans_g',        'Trans fat',            'g',  'fatty_acid', 13, 1),
+        ('cholesterol_mg',     'Cholesterol',          'mg', 'other',      14, 1),
+        ('sugar_added_g',      'Added sugar',          'g',  'macro',      15, 1),
+        ('vitamin_a_ug',       'Vitamin A',            'ug', 'micro',      20, 1),
+        ('vitamin_c_mg',       'Vitamin C',            'mg', 'micro',      21, 1),
+        ('vitamin_d_ug',       'Vitamin D',            'ug', 'micro',      22, 1),
+        ('vitamin_e_mg',       'Vitamin E',            'mg', 'micro',      23, 1),
+        ('vitamin_k_ug',       'Vitamin K',            'ug', 'micro',      24, 1),
+        ('thiamin_mg',         'Thiamin (B1)',         'mg', 'micro',      25, 1),
+        ('riboflavin_mg',      'Riboflavin (B2)',      'mg', 'micro',      26, 1),
+        ('niacin_mg',          'Niacin (B3)',          'mg', 'micro',      27, 1),
+        ('pantothenic_acid_mg','Pantothenic acid (B5)','mg', 'micro',      28, 1),
+        ('vitamin_b6_mg',      'Vitamin B6',           'mg', 'micro',      29, 1),
+        ('folate_ug',          'Folate (B9)',          'ug', 'micro',      30, 1),
+        ('vitamin_b12_ug',     'Vitamin B12',          'ug', 'micro',      31, 1),
+        ('choline_mg',         'Choline',              'mg', 'micro',      32, 0),
+        ('calcium_mg',         'Calcium',              'mg', 'micro',      40, 1),
+        ('iron_mg',            'Iron',                 'mg', 'micro',      41, 1),
+        ('magnesium_mg',       'Magnesium',            'mg', 'micro',      42, 1),
+        ('phosphorus_mg',      'Phosphorus',           'mg', 'micro',      43, 1),
+        ('potassium_mg',       'Potassium',            'mg', 'micro',      44, 1),
+        ('zinc_mg',            'Zinc',                 'mg', 'micro',      45, 1),
+        ('copper_mg',          'Copper',               'mg', 'micro',      46, 0),
+        ('manganese_mg',       'Manganese',            'mg', 'micro',      47, 0),
+        ('selenium_ug',        'Selenium',             'ug', 'micro',      48, 0),
+        ('iodine_ug',          'Iodine',               'ug', 'micro',      49, 0);
+    `,
+  },
+  {
+    // Nutrition planning: versioned saved plans plus an append-only log of daily
+    // target changes. Existing `targets` rows are untouched; future changes made
+    // through the app record a history row so past targets stay comparable.
+    version: 9,
+    sql: `
+      CREATE TABLE IF NOT EXISTS nutrition_plans (
+        id                TEXT PRIMARY KEY,
+        created_at        INTEGER NOT NULL,
+        updated_at        INTEGER NOT NULL,
+        is_active         INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0,1)),
+        sex               TEXT NOT NULL CHECK (sex IN ('male','female')),
+        age               INTEGER NOT NULL,
+        height_cm         REAL NOT NULL,
+        weight_kg         REAL NOT NULL,
+        activity          TEXT NOT NULL,
+        goal              TEXT NOT NULL,
+        rate_kg_per_week  REAL NOT NULL DEFAULT 0,
+        protein_per_kg    REAL NOT NULL,
+        fat_per_kg        REAL,
+        fat_percent       REAL NOT NULL,
+        bmr_kcal          INTEGER NOT NULL,
+        tdee_kcal         INTEGER NOT NULL,
+        target_kcal       INTEGER NOT NULL,
+        protein_g         INTEGER NOT NULL,
+        fat_g             INTEGER NOT NULL,
+        carb_g            INTEGER NOT NULL,
+        notes             TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_nutrition_plans_active ON nutrition_plans(is_active);
+
+      CREATE TABLE IF NOT EXISTS target_history (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        nutrient_id    TEXT NOT NULL REFERENCES nutrients(id),
+        target_milli   INTEGER,
+        effective_from TEXT NOT NULL,
+        source         TEXT NOT NULL CHECK (source IN ('manual','plan','seed')),
+        created_at     INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_target_history ON target_history(nutrient_id, effective_from);
+    `,
+  },
+  {
+    // Body-measurement tracking. The original `body_metrics.metric_type` CHECK
+    // only allowed weight/height/body-fat/waist/other. This widens it to the
+    // full set of tape measurements (neck, chest, hips, thigh, arm, calf) so the
+    // Body section can log them. Rebuild preserves every existing row verbatim.
+    version: 10,
+    sql: `
+      CREATE TABLE body_metrics_new (
+        id          TEXT PRIMARY KEY,
+        metric_type TEXT NOT NULL CHECK (metric_type IN ('weight_kg','height_cm','body_fat_pct','neck_cm','chest_cm','waist_cm','hips_cm','thigh_cm','arm_cm','calf_cm','other')),
+        value       REAL NOT NULL,
+        local_date  TEXT NOT NULL,
+        note        TEXT,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      );
+      INSERT INTO body_metrics_new (id, metric_type, value, local_date, note, created_at, updated_at)
+        SELECT id, metric_type, value, local_date, note, created_at, updated_at FROM body_metrics;
+      DROP TABLE body_metrics;
+      ALTER TABLE body_metrics_new RENAME TO body_metrics;
+      CREATE INDEX IF NOT EXISTS idx_body_metrics_date ON body_metrics(metric_type, local_date);
+    `,
+  },
 ];
 
 function applyMigrations(db: DB): boolean {

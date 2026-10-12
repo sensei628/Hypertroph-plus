@@ -27,7 +27,7 @@ beforeAll(async () => {
 
 describe('schema, seed & search', () => {
   it('loads the schema and seed data', () => {
-    expect(repo.getNutrientDefs().length).toBe(7);
+    expect(repo.getNutrientDefs().length).toBe(36);
     expect(repo.searchFoods('').length).toBeGreaterThanOrEqual(7);
   });
 

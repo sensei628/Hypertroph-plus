@@ -6,6 +6,10 @@ import { exportBackup, importBackup } from '../data/backup';
 import { getDesktopBridge, type UpdateStatus } from '../desktop';
 import {
   SqliteRepository,
+  BODY_METRIC_TYPES,
+  bodyMetricUnit,
+  isWeightMetric,
+  type BodyMetric,
   type BodyMetricType,
   type DayItemRow,
   type DeleteMode,
@@ -22,13 +26,40 @@ import {
   type WorkoutRow,
   type RecordStats,
   type ScopeStats,
+  type NutritionPlan,
+  type NutritionPlanInput,
+  type NutritionDayTotals,
+  type TrainingSetRow,
+  type LoggedExercise,
 } from '../data/repository';
 import { formatNutrient, toMilli } from '../domain/nutrients';
 import { LogItem, sumNutrients, snapshotLogItem } from '../domain/nutrition';
+import {
+  NUTRIENT_GROUP_LABEL,
+  NUTRIENT_GROUP_ORDER,
+  nutrientGroup,
+  type NutrientGroup,
+} from '../domain/nutrientGroups';
+import {
+  computeEnergyPlan,
+  calibrateMaintenance,
+  ACTIVITY_OPTIONS,
+  GOAL_OPTIONS,
+  GOAL_LABELS,
+  kgToLb,
+  lbToKg,
+  type EnergyInputs,
+  type CalibrationResult,
+  type Goal,
+  type ActivityLevel,
+  type Sex,
+} from '../domain/energy';
 import { gToKg, gToLb, kgToG, lbToG, e1rmG } from '../domain/training';
+import { addDaysISO, dailySeries, recentWeekStarts, sumByWeek, mean, macroEnergySplit, shortLabel } from '../domain/stats';
+import { BarChart, LineChart, StackedBar, Ring } from './charts';
 import { CommandPalette } from './CommandPalette';
 
-type Section = 'nutrition' | 'training' | 'settings';
+type Section = 'nutrition' | 'training' | 'body' | 'stats' | 'settings';
 type PaletteMode = 'food' | 'exercise';
 type TrainingMode = 'random' | 'plan';
 interface BuilderExercise {
@@ -42,6 +73,11 @@ interface BuilderState {
   id: string | null;
   name: string;
   exercises: BuilderExercise[];
+}
+interface CalibrationInfo extends CalibrationResult {
+  spanDays: number;
+  loggedDays: number;
+  weightEntries: number;
 }
 const DEFAULT_MEALS = ['breakfast', 'lunch', 'dinner'] as const;
 const SUMMARY_NUTRIENTS = ['energy_kcal', 'protein_g', 'carb_g', 'fat_g'];
@@ -137,6 +173,10 @@ export function App() {
     body: { count: 0, firstDate: null, lastDate: null },
   });
   const [refReady, setRefReady] = useState(false);
+  const [nutritionPlans, setNutritionPlans] = useState<NutritionPlan[]>([]);
+  const [activePlan, setActivePlan] = useState<NutritionPlan | null>(null);
+  const [latestWeightKg, setLatestWeightKg] = useState<number | null>(null);
+  const [bodyMetrics, setBodyMetrics] = useState<BodyMetric[]>([]);
 
   const [palette, setPalette] = useState<PaletteMode | null>(null);
   const [palettePurpose, setPalettePurpose] = useState<'log' | 'builder'>('log');
@@ -175,6 +215,10 @@ export function App() {
         setTrainingMode(r.getPreference('training.mode', 'random') === 'plan' ? 'plan' : 'random');
         setPinnedFoods(r.getPinnedFoods());
         setPinnedExercises(r.getPinnedExercises());
+        setNutritionPlans(r.listNutritionPlans());
+        setActivePlan(r.getActiveNutritionPlan());
+        setLatestWeightKg(r.getBodyMetrics('weight_kg', 1)[0]?.value ?? null);
+        setBodyMetrics(r.listBodyMetrics());
         const savedTheme = r.getPreference('theme', 'dark') === 'dark' ? 'dark' : 'light';
         setTheme(savedTheme);
         document.documentElement.classList.toggle('dark', savedTheme === 'dark');
@@ -198,6 +242,10 @@ export function App() {
     setActiveWorkout(repo.getActiveWorkout(date));
     setRoutines(repo.listRoutines());
     setRecordStats(repo.getRecordStats());
+    setNutritionPlans(repo.listNutritionPlans());
+    setActivePlan(repo.getActiveNutritionPlan());
+    setLatestWeightKg(repo.getBodyMetrics('weight_kg', 1)[0]?.value ?? null);
+    setBodyMetrics(repo.listBodyMetrics());
     const [ws, we] = weekRange(date);
     setWeeklyVolume(repo.getWeeklyVolume(ws, we, secondaryFactor));
   }, [repo, date, secondaryFactor]);
@@ -615,6 +663,104 @@ export function App() {
     refresh();
   }
 
+  function deleteBodyMetric(id: string) {
+    if (!repo) return;
+    repo.deleteBodyMetric(id);
+    refresh();
+  }
+
+  function saveAndApplyPlan(input: EnergyInputs) {
+    if (!repo) return;
+    const result = computeEnergyPlan(input);
+    const plan: NutritionPlanInput = {
+      id: activePlan?.id,
+      ...input,
+      fatPerKg: input.fatPerKg,
+      bmrKcal: result.bmr,
+      tdeeKcal: result.tdee,
+      targetKcal: result.targetKcal,
+      proteinG: result.proteinG,
+      fatG: result.fatG,
+      carbG: result.carbG,
+    };
+    const id = repo.saveNutritionPlan(plan);
+    repo.applyNutritionPlan(id, date);
+    setTargets(repo.getTargets());
+    refresh();
+    setToast('Nutrition plan applied to daily targets');
+  }
+
+  function applyPlan(id: string) {
+    if (!repo) return;
+    repo.applyNutritionPlan(id, date);
+    setTargets(repo.getTargets());
+    refresh();
+    setToast('Plan applied to daily targets');
+  }
+
+  /** Observed maintenance from the last ~4 weeks of real intake + weight data. */
+  function computeCalibration(): CalibrationInfo | null {
+    if (!repo) return null;
+    const end = date;
+    const from = addDaysISO(end, -27);
+    const days = repo.getNutritionDailySince(from).filter((d) => d.localDate <= end);
+    const logged = days.filter((d) => (d.totalsMilli.get('energy_kcal') ?? 0) > 0);
+    if (logged.length < 14) return null;
+    const avgIntakeKcal = logged.reduce((a, d) => a + (d.totalsMilli.get('energy_kcal') ?? 0) / 1000, 0) / logged.length;
+
+    const weights = bodyMetrics
+      .filter((m) => m.metricType === 'weight_kg' && m.localDate >= from && m.localDate <= end)
+      .sort((a, b) => a.localDate.localeCompare(b.localDate));
+    if (weights.length < 2) return null;
+    const first = weights[0];
+    const last = weights[weights.length - 1];
+    const spanDays = Math.round((new Date(`${last.localDate}T12:00:00`).getTime() - new Date(`${first.localDate}T12:00:00`).getTime()) / 86_400_000);
+    if (spanDays < 14) return null;
+    const cal = calibrateMaintenance(avgIntakeKcal, last.value - first.value, spanDays);
+    if (!cal) return null;
+    return { ...cal, spanDays, loggedDays: logged.length, weightEntries: weights.length };
+  }
+
+  /** Recompute the active plan using an observed maintenance value. */
+  function recalibratePlan(observedMaintenanceKcal: number) {
+    if (!repo || !activePlan) return;
+    const inputs: EnergyInputs = {
+      sex: activePlan.sex,
+      age: activePlan.age,
+      heightCm: activePlan.heightCm,
+      weightKg: activePlan.weightKg,
+      activity: activePlan.activity,
+      goal: activePlan.goal,
+      rateKgPerWeek: activePlan.rateKgPerWeek,
+      proteinPerKg: activePlan.proteinPerKg,
+      fatPerKg: activePlan.fatPerKg ?? 0.6,
+      fatPercent: activePlan.fatPercent,
+    };
+    const result = computeEnergyPlan(inputs, { maintenanceKcal: observedMaintenanceKcal });
+    const id = repo.saveNutritionPlan({
+      id: activePlan.id,
+      ...inputs,
+      bmrKcal: result.bmr,
+      tdeeKcal: result.tdee,
+      targetKcal: result.targetKcal,
+      proteinG: result.proteinG,
+      fatG: result.fatG,
+      carbG: result.carbG,
+      notes: `Calibrated from observed maintenance ${observedMaintenanceKcal} kcal`,
+    });
+    repo.applyNutritionPlan(id, date);
+    setTargets(repo.getTargets());
+    refresh();
+    setToast('Plan recalibrated from your logged data');
+  }
+
+  function deleteNutritionPlan(id: string) {
+    if (!repo) return;
+    repo.deleteNutritionPlan(id);
+    refresh();
+    setToast('Plan deleted');
+  }
+
   if (error) {
     return (
       <div className="content">
@@ -701,6 +847,26 @@ export function App() {
             />
           )}
 
+          {section === 'body' && (
+            <BodySection
+              metrics={bodyMetrics}
+              units={units}
+              date={date}
+              onAdd={addBodyMetric}
+              onDelete={deleteBodyMetric}
+            />
+          )}
+
+          {section === 'stats' && (
+            <StatsSection
+              repo={repo}
+              units={units}
+              date={date}
+              targets={targets}
+              bodyMetrics={bodyMetrics}
+            />
+          )}
+
           {section === 'settings' && (
             <Settings
               units={units}
@@ -713,6 +879,14 @@ export function App() {
               targets={targets}
               defById={defById}
               onChangeTarget={changeTarget}
+              plans={nutritionPlans}
+              activePlan={activePlan}
+              latestWeightKg={latestWeightKg}
+              calibration={computeCalibration()}
+              onSaveAndApplyPlan={saveAndApplyPlan}
+              onApplyPlan={applyPlan}
+              onRecalibrate={recalibratePlan}
+              onDeletePlan={deleteNutritionPlan}
               onExportBackup={handleExportBackup}
               onImportBackup={handleImportBackup}
               stats={recordStats}
@@ -744,6 +918,24 @@ export function App() {
           >
             <Icon name="training" />
             Training
+          </button>
+          <button
+            role="tab"
+            aria-selected={section === 'body'}
+            className={section === 'body' ? 'active' : ''}
+            onClick={() => go('body')}
+          >
+            <Icon name="activity" />
+            Body
+          </button>
+          <button
+            role="tab"
+            aria-selected={section === 'stats'}
+            className={section === 'stats' ? 'active' : ''}
+            onClick={() => go('stats')}
+          >
+            <Icon name="stats" />
+            Stats
           </button>
           <button
             role="tab"
@@ -835,7 +1027,8 @@ type IconName =
   | 'pause'
   | 'stop'
   | 'target'
-  | 'activity';
+  | 'activity'
+  | 'stats';
 
 function Icon({ name, className }: { name: IconName; className?: string }) {
   let body: ReactNode = null;
@@ -928,6 +1121,16 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
     case 'activity':
       body = <path d="M3 12h4l2.5-7 4 14 2.5-7H21" />;
       break;
+    case 'stats':
+      body = (
+        <>
+          <path d="M3 20h18" />
+          <rect x="5" y="11" width="3" height="7" rx="0.6" />
+          <rect x="10.5" y="5" width="3" height="13" rx="0.6" />
+          <rect x="16" y="9" width="3" height="9" rx="0.6" />
+        </>
+      );
+      break;
   }
   return (
     <svg
@@ -985,6 +1188,20 @@ function Sidebar({
         >
           <Icon name="training" className="nav-icon" /> Training
           {trainingCount > 0 && <span className="nav-badge">{trainingCount}</span>}
+        </button>
+        <button
+          className={`nav-item ${section === 'body' ? 'active' : ''}`}
+          aria-current={section === 'body' ? 'page' : undefined}
+          onClick={() => onNavigate('body')}
+        >
+          <Icon name="activity" className="nav-icon" /> Body
+        </button>
+        <button
+          className={`nav-item ${section === 'stats' ? 'active' : ''}`}
+          aria-current={section === 'stats' ? 'page' : undefined}
+          onClick={() => onNavigate('stats')}
+        >
+          <Icon name="stats" className="nav-icon" /> Stats
         </button>
       </nav>
 
@@ -1188,6 +1405,28 @@ function NutritionSection(props: {
   const isToday = props.date === toISODate(new Date());
   const macros = SUMMARY_NUTRIENTS.filter((n) => n !== 'energy_kcal');
 
+  // Every tracked nutrient except the four headline macros, grouped for display.
+  // A nutrient appears once it has any recorded value (known or unknown) or a
+  // target; empty groups are hidden so the card stays useful, not noisy.
+  const detailGroups = useMemo(() => {
+    const byGroup = new Map<NutrientGroup, NutrientDef[]>();
+    for (const d of props.defById.values()) {
+      if (SUMMARY_NUTRIENTS.includes(d.id)) continue;
+      const g = nutrientGroup(d.id);
+      const arr = byGroup.get(g);
+      if (arr) arr.push(d);
+      else byGroup.set(g, [d]);
+    }
+    for (const arr of byGroup.values()) arr.sort((a, b) => a.displayOrder - b.displayOrder);
+    return NUTRIENT_GROUP_ORDER.map((g) => ({
+      group: g,
+      label: NUTRIENT_GROUP_LABEL[g],
+      defs: (byGroup.get(g) ?? []).filter((d) => props.totals.has(d.id) || props.targets.has(d.id)),
+    })).filter((grp) => grp.defs.length > 0);
+  }, [props.defById, props.totals, props.targets]);
+
+  const detailPartial = detailGroups.some((grp) => grp.defs.some((d) => props.totals.get(d.id)?.hasUnknown));
+
   return (
     <>
       <PageHead
@@ -1290,6 +1529,53 @@ function NutritionSection(props: {
           </p>
         </section>
       </div>
+
+      {detailGroups.length > 0 && (
+        <div className="dash">
+          <section className="card col-span-2">
+            <div className="card-head">
+              <h3>Micronutrients</h3>
+              {detailPartial && <span className="tag partial">partial data</span>}
+            </div>
+            {detailGroups.map((grp) => (
+              <div className="nutrient-group" key={grp.group}>
+                <div className="nutrient-group-label">{grp.label}</div>
+                <div className="bar-list">
+                  {grp.defs.map((d) => {
+                    const t = props.totals.get(d.id);
+                    const target = props.targets.get(d.id);
+                    const unknownOnly = !!t && t.hasUnknown && t.sumMilli === 0;
+                    const p = t && target ? Math.min(100, (t.sumMilli / target) * 100) : 0;
+                    return (
+                      <div className="bar-item" key={d.id}>
+                        <div className="row small">
+                          <span>
+                            {d.name}
+                            {t?.hasUnknown && !unknownOnly ? <span className="muted"> · partial</span> : null}
+                          </span>
+                          <span className="mono">
+                            {unknownOnly ? '\u2014' : formatNutrient(t?.sumMilli ?? null, d.unit)} /{' '}
+                            {target ? formatNutrient(target, d.unit) : '\u2014'} {d.unit}
+                          </span>
+                        </div>
+                        {target ? (
+                          <div className="pill-bar">
+                            <span style={{ width: `${p}%` }} />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <p className="muted small" style={{ marginTop: 12 }}>
+              Values come from the foods you log. USDA reference foods carry the full set; set daily targets in Settings to
+              see progress. A dot marks nutrients where some foods didn't report a value — unknowns are never counted as zero.
+            </p>
+          </section>
+        </div>
+      )}
 
       <div className="dash">
         <section className="card col-span-2">
@@ -1774,6 +2060,369 @@ function PlanBuilder(props: {
   );
 }
 
+// ── Stats ───────────────────────────────────────────────────
+type StatTab = 'nutrition' | 'training' | 'body';
+
+function StatsSection(props: {
+  repo: SqliteRepository;
+  units: 'kg' | 'lb';
+  date: string;
+  targets: Map<string, number>;
+  bodyMetrics: BodyMetric[];
+}) {
+  const [tab, setTab] = useState<StatTab>('nutrition');
+  const [range, setRange] = useState(14);
+  const [weeks, setWeeks] = useState(8);
+  const [exerciseId, setExerciseId] = useState('');
+  const [bodyType, setBodyType] = useState<BodyMetricType>('weight_kg');
+
+  const [nutritionDays, setNutritionDays] = useState<NutritionDayTotals[]>([]);
+  const [trainingSets, setTrainingSets] = useState<TrainingSetRow[]>([]);
+  const [loggedExercises, setLoggedExercises] = useState<LoggedExercise[]>([]);
+
+  useEffect(() => {
+    setNutritionDays(props.repo.getNutritionDailySince(addDaysISO(props.date, -(range - 1))));
+  }, [props.repo, props.date, range]);
+
+  useEffect(() => {
+    setTrainingSets(props.repo.getTrainingSets());
+    const ex = props.repo.listLoggedExercises();
+    setLoggedExercises(ex);
+    setExerciseId((cur) => cur || ex[0]?.id || '');
+  }, [props.repo]);
+
+  // ── nutrition ──
+  const totalByDate = new Map(nutritionDays.map((d) => [d.localDate, d.totalsMilli]));
+  const perDay = (date: string, id: string) => (totalByDate.get(date)?.get(id) ?? 0) / 1000;
+  const kcalRows = nutritionDays.map((d) => ({ date: d.localDate, value: (d.totalsMilli.get('energy_kcal') ?? 0) / 1000 }));
+  const kcalSeries = dailySeries(addDaysISO(props.date, -(range - 1)), props.date, kcalRows);
+  const kcalBars = kcalSeries.map((d) => ({ label: shortLabel(d.date), value: Math.round(d.value) }));
+  const targetKcal = (props.targets.get('energy_kcal') ?? 0) / 1000;
+  const loggedDays = kcalSeries.filter((d) => d.value > 0);
+  const avgKcal = mean(loggedDays.map((d) => d.value));
+  const avgP = mean(loggedDays.map((d) => perDay(d.date, 'protein_g')));
+  const avgF = mean(loggedDays.map((d) => perDay(d.date, 'fat_g')));
+  const avgC = mean(loggedDays.map((d) => perDay(d.date, 'carb_g')));
+  const split = macroEnergySplit(avgP, avgF, avgC);
+
+  // ── training ──
+  const working = trainingSets.filter((s) => s.completed && s.setType === 'working');
+  const volRows = working
+    .filter((s) => s.loadG != null && s.reps != null)
+    .map((s) => ({ date: s.localDate, value: (s.loadG as number) * (s.reps as number) }));
+  const weekStarts = recentWeekStarts(weeks, props.date);
+  const volByWeek = sumByWeek(volRows, weekStarts);
+  const setsByWeek = sumByWeek(working.map((s) => ({ date: s.localDate, value: 1 })), weekStarts);
+  const toDispLoad = (g: number) => (props.units === 'lb' ? gToLb(g) : gToKg(g));
+  const volBars = weekStarts.map((w, i) => ({ label: shortLabel(w), value: Math.round(toDispLoad(volByWeek[i])) }));
+  const setBars = weekStarts.map((w, i) => ({ label: shortLabel(w), value: Math.round(setsByWeek[i]) }));
+
+  const exSets = working.filter(
+    (s) => s.exerciseId === exerciseId && s.loadG != null && s.reps != null && (s.loadG as number) > 0 && (s.reps as number) > 0,
+  );
+  const e1rmByDate = new Map<string, number>();
+  for (const s of exSets) {
+    const e = e1rmG(s.loadG as number, s.reps as number);
+    e1rmByDate.set(s.localDate, Math.max(e1rmByDate.get(s.localDate) ?? 0, e));
+  }
+  const e1rmPoints = [...e1rmByDate.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, g]) => ({ label: shortLabel(date), value: Math.round(toDispLoad(g) * 10) / 10 }));
+  const exName = loggedExercises.find((e) => e.id === exerciseId)?.name ?? '';
+
+  // ── body ──
+  const bodyEntries = props.bodyMetrics
+    .filter((m) => m.metricType === bodyType)
+    .slice()
+    .sort((a, b) => a.localDate.localeCompare(b.localDate));
+  const bodyToDisp = (v: number) => (isWeightMetric(bodyType) && props.units === 'lb' ? kgToLb(v) : v);
+  const bodyPoints = bodyEntries.map((m) => ({ label: shortLabel(m.localDate), value: Math.round(bodyToDisp(m.value) * 10) / 10 }));
+  const bodyUnit = isWeightMetric(bodyType) ? props.units : bodyMetricUnit(bodyType);
+  const bodyTypesWithData = BODY_METRIC_TYPES.filter(([id]) => props.bodyMetrics.some((m) => m.metricType === id));
+
+  return (
+    <>
+      <PageHead title="Stats" subtitle="Nutrition, training and body trends" />
+
+      <div className="subtabs" role="tablist" aria-label="Stat category">
+        {(['nutrition', 'training', 'body'] as StatTab[]).map((t) => (
+          <button key={t} role="tab" aria-selected={tab === t} className={`segment ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
+            {t[0].toUpperCase() + t.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'nutrition' && (
+        <div className="grid" style={{ marginTop: 16 }}>
+          <div className="card stat-tile">
+            <Ring
+              value={avgKcal}
+              max={targetKcal}
+              label={
+                <>
+                  {Math.round(avgKcal)}
+                  <small> kcal</small>
+                </>
+              }
+              sub={`avg · target ${Math.round(targetKcal)}`}
+            />
+            <div className="stat-col">
+              <div className="stat-line">
+                <span className="muted small">Days logged</span>
+                <span className="mono">{loggedDays.length} / {range}</span>
+              </div>
+              <div className="stat-line">
+                <span className="muted small">Avg protein</span>
+                <span className="mono">{Math.round(avgP)} g</span>
+              </div>
+              <div className="stat-line">
+                <span className="muted small">Avg fat</span>
+                <span className="mono">{Math.round(avgF)} g</span>
+              </div>
+              <div className="stat-line">
+                <span className="muted small">Avg carbs</span>
+                <span className="mono">{Math.round(avgC)} g</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card col-span-2">
+            <div className="card-head">
+              <h3>Calories per day</h3>
+              <div className="segments">
+                {[14, 30, 90].map((r) => (
+                  <button key={r} className={`segment ${range === r ? 'active' : ''}`} onClick={() => setRange(r)}>
+                    {r}d
+                  </button>
+                ))}
+              </div>
+            </div>
+            <BarChart data={kcalBars} target={targetKcal} unit="kcal" />
+          </div>
+
+          <div className="card col-span-2">
+            <h3>Average macro energy split</h3>
+            <StackedBar
+              segments={[
+                { label: 'Protein', value: split.protein, color: 'var(--green-600)' },
+                { label: 'Carbs', value: split.carb, color: '#4f8ff7' },
+                { label: 'Fat', value: split.fat, color: 'var(--amber)' },
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === 'training' && (
+        <div className="grid" style={{ marginTop: 16 }}>
+          <div className="card col-span-2">
+            <div className="card-head">
+              <h3>Weekly training volume ({props.units})</h3>
+              <div className="segments">
+                {[8, 12, 26].map((w) => (
+                  <button key={w} className={`segment ${weeks === w ? 'active' : ''}`} onClick={() => setWeeks(w)}>
+                    {w}w
+                  </button>
+                ))}
+              </div>
+            </div>
+            <BarChart data={volBars} unit={props.units} />
+          </div>
+
+          <div className="card col-span-2">
+            <h3>Working sets per week</h3>
+            <BarChart data={setBars} unit="sets" color="var(--amber)" />
+          </div>
+
+          <div className="card col-span-2">
+            <div className="card-head">
+              <h3>Estimated 1RM{exName ? ` · ${exName}` : ''}</h3>
+              {loggedExercises.length > 0 && (
+                <select value={exerciseId} onChange={(e) => setExerciseId(e.target.value)}>
+                  {loggedExercises.map((ex) => (
+                    <option key={ex.id} value={ex.id}>
+                      {ex.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {loggedExercises.length === 0 ? (
+              <p className="muted small">Log some working sets to see strength trends.</p>
+            ) : (
+              <LineChart data={e1rmPoints} unit={props.units} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === 'body' && (
+        <div className="grid" style={{ marginTop: 16 }}>
+          <div className="card col-span-2">
+            <div className="card-head">
+              <h3>Body trend</h3>
+              {(bodyTypesWithData.length > 0 ? bodyTypesWithData : BODY_METRIC_TYPES).length > 0 && (
+                <select value={bodyType} onChange={(e) => setBodyType(e.target.value as BodyMetricType)}>
+                  {(bodyTypesWithData.length > 0 ? bodyTypesWithData : BODY_METRIC_TYPES).map(([id, label]) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {bodyPoints.length === 0 ? (
+              <p className="muted small">No measurements logged for this metric yet.</p>
+            ) : (
+              <LineChart data={bodyPoints} unit={bodyUnit} />
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Body measurements ───────────────────────────────────────
+function BodySection(props: {
+  metrics: BodyMetric[];
+  units: 'kg' | 'lb';
+  date: string;
+  onAdd: (input: { metricType: BodyMetricType; value: number; localDate: string; note?: string }) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [metricType, setMetricType] = useState<BodyMetricType>('weight_kg');
+  const [value, setValue] = useState('');
+  const [logDate, setLogDate] = useState(props.date);
+  const [note, setNote] = useState('');
+  const valueOk = Number.isFinite(Number(value)) && Number(value) > 0;
+
+  useEffect(() => setLogDate(props.date), [props.date]);
+
+  const toDisplay = (type: BodyMetricType, v: number) =>
+    isWeightMetric(type) && props.units === 'lb' ? kgToLb(v) : v;
+  const unitFor = (type: BodyMetricType) => (isWeightMetric(type) ? props.units : bodyMetricUnit(type));
+
+  const byType = new Map<BodyMetricType, BodyMetric[]>();
+  for (const m of props.metrics) {
+    const arr = byType.get(m.metricType);
+    if (arr) arr.push(m);
+    else byType.set(m.metricType, [m]);
+  }
+
+  function submit() {
+    if (!valueOk) return;
+    const raw = Number(value);
+    const stored = isWeightMetric(metricType) && props.units === 'lb' ? lbToKg(raw) : raw;
+    props.onAdd({ metricType, value: roundTo(stored, 2), localDate: logDate, note: note.trim() || undefined });
+    setValue('');
+    setNote('');
+  }
+
+  const activeTypes = BODY_METRIC_TYPES.filter(([id]) => (byType.get(id)?.length ?? 0) > 0);
+
+  return (
+    <>
+      <PageHead title="Body" subtitle="Weight and measurements over time" />
+
+      <div className="grid" style={{ marginTop: 16 }}>
+        <div className="card">
+          <h3>Log a measurement</h3>
+          <div className="plan-form" style={{ gridTemplateColumns: '1fr' }}>
+            <label className="plan-field">
+              <span>Metric</span>
+              <select value={metricType} onChange={(e) => setMetricType(e.target.value as BodyMetricType)}>
+                {BODY_METRIC_TYPES.map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="plan-field">
+              <span>
+                Value ({isWeightMetric(metricType) ? props.units : bodyMetricUnit(metricType) || 'value'})
+              </span>
+              <input value={value} inputMode="decimal" placeholder="e.g. 82.5" onChange={(e) => setValue(e.target.value)} />
+            </label>
+            <label className="plan-field">
+              <span>Date</span>
+              <input type="date" value={logDate} onChange={(e) => setLogDate(e.target.value)} />
+            </label>
+            <label className="plan-field">
+              <span>Note</span>
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="optional" />
+            </label>
+          </div>
+          <div className="nav" style={{ marginTop: 12 }}>
+            <button className="primary" disabled={!valueOk} onClick={submit}>
+              Log measurement
+            </button>
+          </div>
+        </div>
+
+        {activeTypes.length === 0 && (
+          <div className="card">
+            <h3>No measurements yet</h3>
+            <p className="muted small">Log your weight, body fat or tape measurements to track them here.</p>
+          </div>
+        )}
+
+        {activeTypes.map(([id]) => {
+          const entries = byType.get(id) ?? [];
+          const latest = entries[0];
+          const prev = entries[1];
+          const delta = prev ? latest.value - prev.value : null;
+          const unit = unitFor(id);
+          return (
+            <div className={`card ${id === 'weight_kg' ? 'featured' : ''}`} key={id}>
+              <div className="card-head">
+                <h3>{BODY_METRIC_LABEL(id)}</h3>
+                <span className="muted small">
+                  {entries.length} entr{entries.length === 1 ? 'y' : 'ies'}
+                </span>
+              </div>
+              <div className="metric-latest">
+                <span className="metric-value">
+                  {roundTo(toDisplay(id, latest.value), 1)}
+                  {unit && <small> {unit}</small>}
+                </span>
+                {delta != null && Math.abs(delta) > 1e-9 && (
+                  <span className={`metric-delta ${delta > 0 ? 'up' : 'down'}`}>
+                    {delta > 0 ? '▲' : '▼'} {roundTo(Math.abs(toDisplay(id, latest.value) - toDisplay(id, prev.value)), 1)} {unit}
+                  </span>
+                )}
+                <span className="muted small">{latest.localDate}</span>
+              </div>
+              <div className="metric-list">
+                {entries.slice(0, 6).map((e) => (
+                  <div className="metric-entry" key={e.id}>
+                    <span className="mono">{roundTo(toDisplay(id, e.value), 1)}{unit && ` ${unit}`}</span>
+                    <span className="muted small grow ellipsis">
+                      {e.localDate}
+                      {e.note ? ` · ${e.note}` : ''}
+                    </span>
+                    <button className="ghost small danger" onClick={() => props.onDelete(e.id)} title="Delete entry">
+                      <Icon name="trash" />
+                    </button>
+                  </div>
+                ))}
+                {entries.length > 6 && <div className="muted small">+{entries.length - 6} older</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function BODY_METRIC_LABEL(type: BodyMetricType): string {
+  const found = BODY_METRIC_TYPES.find(([id]) => id === type);
+  if (!found) return type;
+  return found[1].replace(/\s*\(.*\)$/, '');
+}
+
 // ── Progress ────────────────────────────────────────────────
 function Progress(props: { weeklyVolume: Map<string, number>; muscleNames: Map<string, string>; secondaryFactor: number }) {
   const max = Math.max(1, ...props.weeklyVolume.values());
@@ -1843,6 +2492,255 @@ function scopeRangeLabel(stat: ScopeStats): string {
   return `${stat.count} entr${stat.count === 1 ? 'y' : 'ies'} · ${stat.firstDate} → ${stat.lastDate}`;
 }
 
+// ── Nutrition planner ───────────────────────────────────────
+function roundTo(n: number, dp: number): number {
+  const f = 10 ** dp;
+  return Math.round(n * f) / f;
+}
+
+function NutritionPlanner(props: {
+  units: 'kg' | 'lb';
+  plans: NutritionPlan[];
+  activePlan: NutritionPlan | null;
+  latestWeightKg: number | null;
+  calibration: CalibrationInfo | null;
+  onSaveAndApply: (input: EnergyInputs) => void;
+  onApply: (id: string) => void;
+  onRecalibrate: (observedMaintenanceKcal: number) => void;
+  onDelete: (id: string) => void;
+}) {
+  const a = props.activePlan;
+  const toDisplayWeight = (kg: number) => roundTo(props.units === 'lb' ? kgToLb(kg) : kg, 1);
+
+  const [sex, setSex] = useState<Sex>(a?.sex ?? 'male');
+  const [age, setAge] = useState<string>(a ? String(a.age) : '30');
+  const [heightCm, setHeightCm] = useState<string>(a ? String(a.heightCm) : '');
+  const [weight, setWeight] = useState<string>(
+    a ? String(toDisplayWeight(a.weightKg)) : props.latestWeightKg != null ? String(toDisplayWeight(props.latestWeightKg)) : '',
+  );
+  const [activity, setActivity] = useState<ActivityLevel>(a?.activity ?? 'moderate');
+  const [goal, setGoal] = useState<Goal>(a?.goal ?? 'maintain');
+  const [rate, setRate] = useState<string>(a ? String(a.rateKgPerWeek) : '0.5');
+  const [proteinPerKg, setProteinPerKg] = useState<string>(a ? String(a.proteinPerKg) : '1.8');
+  const [fatPerKg, setFatPerKg] = useState<string>(a?.fatPerKg != null ? String(a.fatPerKg) : '0.6');
+  const [fatPercent, setFatPercent] = useState<string>(a ? String(Math.round(a.fatPercent * 100)) : '25');
+
+  const weightKg = weight ? (props.units === 'lb' ? lbToKg(Number(weight)) : Number(weight)) : 0;
+  const inputs: EnergyInputs = {
+    sex,
+    age: Number(age) || 0,
+    heightCm: Number(heightCm) || 0,
+    weightKg,
+    activity,
+    goal,
+    rateKgPerWeek: Number(rate) || 0,
+    proteinPerKg: Number(proteinPerKg) || 0,
+    fatPerKg: Number(fatPerKg) || 0,
+    fatPercent: (Number(fatPercent) || 0) / 100,
+  };
+  const valid = inputs.weightKg > 0 && inputs.heightCm > 0 && inputs.age > 0;
+  const result = computeEnergyPlan(inputs);
+  const unit = props.units;
+
+  return (
+    <>
+      <div className="card-head">
+        <h3>Nutrition plan</h3>
+        <span className="muted small">Estimates only — apply to your daily targets when you're happy with them</span>
+      </div>
+
+      <div className="plan-form">
+        <label className="plan-field">
+          <span>Sex</span>
+          <select value={sex} onChange={(e) => setSex(e.target.value as Sex)}>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </label>
+        <label className="plan-field">
+          <span>Age</span>
+          <input type="number" min={1} value={age} onChange={(e) => setAge(e.target.value)} />
+        </label>
+        <label className="plan-field">
+          <span>Height (cm)</span>
+          <input type="number" min={0} value={heightCm} onChange={(e) => setHeightCm(e.target.value)} placeholder="e.g. 180" />
+        </label>
+        <label className="plan-field">
+          <span>Weight ({unit})</span>
+          <input type="number" min={0} value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 80" />
+        </label>
+        <label className="plan-field plan-field-wide">
+          <span>Activity</span>
+          <select value={activity} onChange={(e) => setActivity(e.target.value as ActivityLevel)}>
+            {ACTIVITY_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="plan-field">
+          <span>Goal</span>
+          <select value={goal} onChange={(e) => setGoal(e.target.value as Goal)}>
+            {GOAL_OPTIONS.map((g) => (
+              <option key={g} value={g}>
+                {GOAL_LABELS[g]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="plan-field">
+          <span>{goal === 'gain' ? 'Surplus' : 'Deficit'} rate (kg/week)</span>
+          <input
+            type="number"
+            min={0}
+            step="0.05"
+            value={rate}
+            onChange={(e) => setRate(e.target.value)}
+            disabled={goal === 'maintain' || goal === 'recomp'}
+          />
+        </label>
+        <label className="plan-field">
+          <span>Protein (g/kg)</span>
+          <input type="number" min={0} step="0.1" value={proteinPerKg} onChange={(e) => setProteinPerKg(e.target.value)} />
+        </label>
+        <label className="plan-field">
+          <span>Fat (% of kcal)</span>
+          <input type="number" min={0} step="1" value={fatPercent} onChange={(e) => setFatPercent(e.target.value)} />
+        </label>
+        <label className="plan-field">
+          <span>Fat floor (g/kg)</span>
+          <input type="number" min={0} step="0.1" value={fatPerKg} onChange={(e) => setFatPerKg(e.target.value)} />
+        </label>
+      </div>
+
+      {valid ? (
+        <div className="plan-preview">
+          <div className="plan-stat">
+            <span className="plan-stat-label">BMR</span>
+            <span className="plan-stat-value">{result.bmr.toLocaleString()} <small>kcal</small></span>
+          </div>
+          <div className="plan-stat">
+            <span className="plan-stat-label">Maintenance</span>
+            <span className="plan-stat-value">{result.tdee.toLocaleString()} <small>kcal</small></span>
+          </div>
+          <div className="plan-stat featured">
+            <span className="plan-stat-label">Target</span>
+            <span className="plan-stat-value">{result.targetKcal.toLocaleString()} <small>kcal</small></span>
+          </div>
+          <div className="plan-stat">
+            <span className="plan-stat-label">Protein</span>
+            <span className="plan-stat-value">{result.proteinG} <small>g</small></span>
+          </div>
+          <div className="plan-stat">
+            <span className="plan-stat-label">Fat</span>
+            <span className="plan-stat-value">{result.fatG} <small>g</small></span>
+          </div>
+          <div className="plan-stat">
+            <span className="plan-stat-label">Carbs</span>
+            <span className="plan-stat-value">{result.carbG} <small>g</small></span>
+          </div>
+        </div>
+      ) : (
+        <p className="muted small">Enter sex, age, height and weight to see your energy estimate.</p>
+      )}
+
+      {valid && result.warnings.length > 0 && (
+        <ul className="plan-warnings">
+          {result.warnings.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
+
+      <div className="nav" style={{ marginTop: 12 }}>
+        <button className="primary" disabled={!valid} onClick={() => props.onSaveAndApply(inputs)}>
+          Apply to daily targets
+        </button>
+      </div>
+
+      {props.plans.length > 0 && (
+        <div className="plan-saved">
+          <div className="plan-saved-label">Saved plans</div>
+          {props.plans.map((p) => (
+            <div className="plan-saved-row" key={p.id}>
+              <span className="grow ellipsis">
+                {GOAL_LABELS[p.goal]} · {p.targetKcal.toLocaleString()} kcal · {roundTo(toDisplayWeight(p.weightKg), 1)} {unit}
+                {p.isActive && <span className="tag"> active</span>}
+              </span>
+              {!p.isActive && (
+                <button className="ghost small" onClick={() => props.onApply(p.id)}>
+                  Activate
+                </button>
+              )}
+              <button className="ghost small danger" onClick={() => props.onDelete(p.id)} title="Delete plan">
+                <Icon name="trash" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <CalibrationBlock
+        calibration={props.calibration}
+        activePlan={props.activePlan}
+        onRecalibrate={props.onRecalibrate}
+      />
+    </>
+  );
+}
+
+function CalibrationBlock(props: {
+  calibration: CalibrationInfo | null;
+  activePlan: NutritionPlan | null;
+  onRecalibrate: (observedMaintenanceKcal: number) => void;
+}) {
+  const cal = props.calibration;
+  return (
+    <div className="calib">
+      <div className="plan-saved-label">Maintenance calibration</div>
+      {!props.activePlan ? (
+        <p className="muted small">Apply a plan first, then log food and weight for a few weeks to calibrate it.</p>
+      ) : !cal ? (
+        <p className="muted small">
+          Log at least 14 days of food and two weight entries spanning 2+ weeks in the last month to calibrate against real data.
+        </p>
+      ) : (
+        <>
+          <div className="calib-row">
+            <span className="muted small">Observed maintenance</span>
+            <span className="mono">{cal.observedMaintenanceKcal.toLocaleString()} kcal</span>
+          </div>
+          <div className="calib-row">
+            <span className="muted small">Formula estimate</span>
+            <span className="mono">{props.activePlan.tdeeKcal.toLocaleString()} kcal</span>
+          </div>
+          <div className="calib-row">
+            <span className="muted small">Avg intake</span>
+            <span className="mono">{cal.avgIntakeKcal.toLocaleString()} kcal</span>
+          </div>
+          <div className="calib-row">
+            <span className="muted small">Weight change</span>
+            <span className="mono">
+              {cal.weightChangeKg >= 0 ? '+' : ''}
+              {cal.weightChangeKg.toFixed(1)} kg / {cal.spanDays}d
+            </span>
+          </div>
+          <p className="muted small" style={{ marginTop: 8 }}>
+            Based on {cal.loggedDays} logged days and {cal.weightEntries} weigh-ins. Recalibrating rebuilds your target
+            calories and macros from this observed maintenance.
+          </p>
+          <div className="nav" style={{ marginTop: 10 }}>
+            <button className="ghost" onClick={() => props.onRecalibrate(cal.observedMaintenanceKcal)}>
+              Recalibrate targets
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Settings(props: {
   units: 'kg' | 'lb';
   onChangeUnits: (u: 'kg' | 'lb') => void;
@@ -1851,6 +2749,14 @@ function Settings(props: {
   targets: Map<string, number>;
   defById: Map<string, NutrientDef>;
   onChangeTarget: (id: string, value: number) => void;
+  plans: NutritionPlan[];
+  activePlan: NutritionPlan | null;
+  latestWeightKg: number | null;
+  calibration: CalibrationInfo | null;
+  onSaveAndApplyPlan: (input: EnergyInputs) => void;
+  onApplyPlan: (id: string) => void;
+  onRecalibrate: (observedMaintenanceKcal: number) => void;
+  onDeletePlan: (id: string) => void;
   onExportBackup: () => void;
   onImportBackup: (file: File) => void;
   stats: RecordStats;
@@ -1877,6 +2783,20 @@ function Settings(props: {
     <>
       <PageHead title="Settings" subtitle="Preferences, daily targets and local backups" />
       <div className="grid" style={{ marginTop: 16 }}>
+        <div className="card col-span-2">
+          <NutritionPlanner
+            units={props.units}
+            plans={props.plans}
+            activePlan={props.activePlan}
+            latestWeightKg={props.latestWeightKg}
+            calibration={props.calibration}
+            onSaveAndApply={props.onSaveAndApplyPlan}
+            onApply={props.onApplyPlan}
+            onRecalibrate={props.onRecalibrate}
+            onDelete={props.onDeletePlan}
+          />
+        </div>
+
         <div className="card">
           <h3>Units</h3>
           <div className="row">

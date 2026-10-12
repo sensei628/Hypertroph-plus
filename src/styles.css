@@ -761,6 +761,329 @@ button.primary .kbd {
   margin-bottom: 3px;
 }
 
+/* ── Micronutrient groups ──────────────────────────────────── */
+.nutrient-group + .nutrient-group {
+  margin-top: 18px;
+}
+
+.nutrient-group-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+/* ── Nutrition planner ─────────────────────────────────────── */
+.plan-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.plan-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.plan-field > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-field-wide {
+  grid-column: 1 / -1;
+}
+
+.plan-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.plan-stat {
+  background: var(--track);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-stat.featured {
+  background: var(--green-600);
+  color: #fff;
+}
+
+.plan-stat-label {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.plan-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-stat-value small {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+.plan-warnings {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.plan-warnings li + li {
+  margin-top: 3px;
+}
+
+.plan-saved {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.plan-saved-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.plan-saved-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+/* ── Maintenance calibration ───────────────────────────────── */
+.calib {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.calib-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+}
+
+/* ── Body measurements ─────────────────────────────────────── */
+.card.featured {
+  border-color: var(--green-600);
+  box-shadow: 0 0 0 1px var(--green-600), var(--shadow-xs);
+}
+
+.metric-latest {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0 14px;
+}
+
+.metric-value {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-value small {
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.metric-delta {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--track);
+}
+
+.metric-delta.up {
+  color: var(--amber);
+}
+
+.metric-delta.down {
+  color: var(--green-700, var(--green-600));
+}
+
+.metric-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.metric-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.metric-entry .mono {
+  min-width: 62px;
+}
+
+/* ── Stats / charts ────────────────────────────────────────── */
+.subtabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 3px;
+  background: var(--track);
+  border-radius: var(--radius-md);
+}
+
+.chart {
+  margin-top: 12px;
+}
+
+.chart-cap {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+.chart-labels {
+  display: flex;
+  margin-top: 5px;
+}
+
+.chart-label {
+  flex: 1 1 0;
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.stacked-bar-wrap {
+  margin-top: 14px;
+}
+
+.stacked-bar {
+  display: block;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.ring {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+
+.ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.ring-value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ring-value small {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.ring-sub {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.stat-tile {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.stat-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.stat-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.stat-line:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
 /* ── Rows / lists ──────────────────────────────────────────── */
 .row {
   display: flex;

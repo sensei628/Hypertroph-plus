@@ -11,6 +11,11 @@ INSERT INTO sources (id, name, license, license_url, attribution, redistribution
   ('s_app',  'hypertroph+ original data', 'original-work', NULL, 'Demo/seed data authored for hypertroph+ (not third-party).', 'allowed', 'base-model-1', 1700000000000),
   ('s_user', 'User-entered', 'user', NULL, NULL, 'forbidden', NULL, NULL);
 
+-- Core nutrients (energy + macros + the one mineral in the base model) plus the
+-- full micronutrient set surfaced from the USDA reference pack (see
+-- REF_CODE_TO_APP in src/data/repository.ts). Amounts are always stored in the
+-- nutrient's canonical unit; unit 'ug' is micrograms. `targetable` marks the
+-- nutrients a user may set a daily goal for.
 INSERT INTO nutrients (id, name, unit, kind, display_order, targetable) VALUES
   ('energy_kcal', 'Calories', 'kcal', 'energy', 1, 1),
   ('protein_g',   'Protein',  'g',    'macro',  2, 1),
@@ -18,7 +23,36 @@ INSERT INTO nutrients (id, name, unit, kind, display_order, targetable) VALUES
   ('fat_g',       'Fat',      'g',    'macro',  4, 1),
   ('fiber_g',     'Fiber',    'g',    'macro',  5, 0),
   ('sugar_g',     'Sugar',    'g',    'macro',  6, 0),
-  ('sodium_mg',   'Sodium',   'mg',   'micro',  7, 0);
+  ('sodium_mg',   'Sodium',   'mg',   'micro',  7, 0),
+  ('fat_saturated_g',    'Saturated fat',        'g',  'fatty_acid', 10, 1),
+  ('fat_mono_g',         'Monounsaturated fat',  'g',  'fatty_acid', 11, 0),
+  ('fat_poly_g',         'Polyunsaturated fat',  'g',  'fatty_acid', 12, 0),
+  ('fat_trans_g',        'Trans fat',            'g',  'fatty_acid', 13, 1),
+  ('cholesterol_mg',     'Cholesterol',          'mg', 'other',      14, 1),
+  ('sugar_added_g',      'Added sugar',          'g',  'macro',      15, 1),
+  ('vitamin_a_ug',       'Vitamin A',            'ug', 'micro',      20, 1),
+  ('vitamin_c_mg',       'Vitamin C',            'mg', 'micro',      21, 1),
+  ('vitamin_d_ug',       'Vitamin D',            'ug', 'micro',      22, 1),
+  ('vitamin_e_mg',       'Vitamin E',            'mg', 'micro',      23, 1),
+  ('vitamin_k_ug',       'Vitamin K',            'ug', 'micro',      24, 1),
+  ('thiamin_mg',         'Thiamin (B1)',         'mg', 'micro',      25, 1),
+  ('riboflavin_mg',      'Riboflavin (B2)',      'mg', 'micro',      26, 1),
+  ('niacin_mg',          'Niacin (B3)',          'mg', 'micro',      27, 1),
+  ('pantothenic_acid_mg','Pantothenic acid (B5)','mg', 'micro',      28, 1),
+  ('vitamin_b6_mg',      'Vitamin B6',           'mg', 'micro',      29, 1),
+  ('folate_ug',          'Folate (B9)',          'ug', 'micro',      30, 1),
+  ('vitamin_b12_ug',     'Vitamin B12',          'ug', 'micro',      31, 1),
+  ('choline_mg',         'Choline',              'mg', 'micro',      32, 0),
+  ('calcium_mg',         'Calcium',              'mg', 'micro',      40, 1),
+  ('iron_mg',            'Iron',                 'mg', 'micro',      41, 1),
+  ('magnesium_mg',       'Magnesium',            'mg', 'micro',      42, 1),
+  ('phosphorus_mg',      'Phosphorus',           'mg', 'micro',      43, 1),
+  ('potassium_mg',       'Potassium',            'mg', 'micro',      44, 1),
+  ('zinc_mg',            'Zinc',                 'mg', 'micro',      45, 1),
+  ('copper_mg',          'Copper',               'mg', 'micro',      46, 0),
+  ('manganese_mg',       'Manganese',            'mg', 'micro',      47, 0),
+  ('selenium_ug',        'Selenium',             'ug', 'micro',      48, 0),
+  ('iodine_ug',          'Iodine',               'ug', 'micro',      49, 0);
 
 -- Food taxonomy vocabulary (app-authored; actual type assignments come only
 -- from real catalogue data, see repository/no-inference rule).

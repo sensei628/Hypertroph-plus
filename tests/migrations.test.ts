@@ -315,3 +315,51 @@ describe('migration v7 (workout plans + per-exercise targets)', () => {
     expect(tables.sort()).toEqual(['routine_exercises', 'routines']);
   });
 });
+
+// Pre-v10 body_metrics with the narrow metric_type CHECK.
+const PRE_V10_SCHEMA = `
+  CREATE TABLE body_metrics (
+    id          TEXT PRIMARY KEY,
+    metric_type TEXT NOT NULL CHECK (metric_type IN ('weight_kg','height_cm','body_fat_pct','waist_cm','other')),
+    value       REAL NOT NULL,
+    local_date  TEXT NOT NULL,
+    note        TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+  );
+`;
+
+describe('migration v10 (body measurement types)', () => {
+  let d: Database;
+
+  beforeAll(async () => {
+    const SQL = await initSqlJs({
+      locateFile: (file) => path.join(path.dirname(require.resolve('sql.js')), file),
+    });
+    d = new SQL.Database();
+    d.run(PRE_V10_SCHEMA);
+    d.run("INSERT INTO body_metrics VALUES ('m1','weight_kg',80,'2026-01-01','a',1,1)");
+    d.run("INSERT INTO body_metrics VALUES ('m2','waist_cm',84,'2026-01-02',NULL,2,2)");
+  });
+
+  it('widens the CHECK and preserves existing rows', () => {
+    const v10 = MIGRATIONS.find((m) => m.version === 10);
+    expect(v10).toBeTruthy();
+    d.run('BEGIN');
+    d.run(v10!.sql);
+    d.run('COMMIT');
+
+    // Newly-allowed measurement types are accepted by the schema.
+    d.run("INSERT INTO body_metrics VALUES ('m3','neck_cm',38,'2026-01-03',NULL,3,3)");
+    const count = d.exec('SELECT COUNT(*) FROM body_metrics')[0].values[0][0];
+    expect(count).toBe(3);
+
+    // Original rows survived the rebuild verbatim.
+    expect(d.exec("SELECT value, note FROM body_metrics WHERE id = 'm1'")[0].values[0]).toEqual([80, 'a']);
+    expect(d.exec("SELECT value FROM body_metrics WHERE id = 'm2'")[0].values[0][0]).toBe(84);
+
+    // The date index was recreated.
+    const idx = d.exec("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_body_metrics_date'")[0].values[0][0];
+    expect(idx).toBe(1);
+  });
+});

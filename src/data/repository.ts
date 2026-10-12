@@ -3,6 +3,7 @@ import { persist } from './db';
 import { NutrientUnit, Milli, toMilli } from '../domain/nutrients';
 import { NutrientValue, LoggedNutrient, LogItem, snapshotLogItem, FoodLike } from '../domain/nutrition';
 import { SetRecord, SetWithExercise, PRKind, evaluateSet, PRState, emptyPRState, workingSetVolumeByMuscle } from '../domain/training';
+import type { Sex, ActivityLevel, Goal } from '../domain/energy';
 
 export function normalizeKey(s: string): string {
   return s
@@ -24,7 +25,13 @@ function uid(): string {
 // working against the user schema and the reference pack is never mutated.
 const REF_PREFIX = 'usda:';
 
-/** Reference nutrient `code` -> app nutrient id. Only the app's core set is used. */
+/**
+ * Reference nutrient `code` -> app nutrient id. Covers the full nutrition set
+ * carried by the USDA reference pack (see tools/import/nutrients.json): energy,
+ * macros, fatty-acid breakdown and the micronutrients (vitamins + minerals).
+ * Codes with no app nutrient (e.g. energy_kj, vitamin_a_iu, folate_dfe) are
+ * intentionally omitted so nothing is double-counted.
+ */
 const REF_CODE_TO_APP: Record<string, string> = {
   energy_kcal: 'energy_kcal',
   protein: 'protein_g',
@@ -32,7 +39,36 @@ const REF_CODE_TO_APP: Record<string, string> = {
   carb: 'carb_g',
   fiber: 'fiber_g',
   sugars: 'sugar_g',
+  sugars_added: 'sugar_added_g',
   sodium: 'sodium_mg',
+  cholesterol: 'cholesterol_mg',
+  fat_saturated: 'fat_saturated_g',
+  fat_mono: 'fat_mono_g',
+  fat_poly: 'fat_poly_g',
+  fat_trans: 'fat_trans_g',
+  vitamin_a_rae: 'vitamin_a_ug',
+  vitamin_c: 'vitamin_c_mg',
+  vitamin_d: 'vitamin_d_ug',
+  vitamin_e: 'vitamin_e_mg',
+  vitamin_k: 'vitamin_k_ug',
+  thiamin: 'thiamin_mg',
+  riboflavin: 'riboflavin_mg',
+  niacin: 'niacin_mg',
+  pantothenic_acid: 'pantothenic_acid_mg',
+  vitamin_b6: 'vitamin_b6_mg',
+  folate: 'folate_ug',
+  vitamin_b12: 'vitamin_b12_ug',
+  choline: 'choline_mg',
+  calcium: 'calcium_mg',
+  iron: 'iron_mg',
+  magnesium: 'magnesium_mg',
+  phosphorus: 'phosphorus_mg',
+  potassium: 'potassium_mg',
+  zinc: 'zinc_mg',
+  copper: 'copper_mg',
+  manganese: 'manganese_mg',
+  selenium: 'selenium_ug',
+  iodine: 'iodine_ug',
 };
 
 // USDA FoodData Central `data_type` -> app entry_type. Real provenance only:
@@ -190,7 +226,18 @@ export interface ExerciseFacets {
   muscles: FacetValue[];
 }
 
-export type BodyMetricType = 'weight_kg' | 'height_cm' | 'body_fat_pct' | 'waist_cm' | 'other';
+export type BodyMetricType =
+  | 'weight_kg'
+  | 'height_cm'
+  | 'body_fat_pct'
+  | 'neck_cm'
+  | 'chest_cm'
+  | 'waist_cm'
+  | 'hips_cm'
+  | 'thigh_cm'
+  | 'arm_cm'
+  | 'calf_cm'
+  | 'other';
 
 export interface BodyMetric {
   id: string;
@@ -199,6 +246,27 @@ export interface BodyMetric {
   localDate: string;
   note: string | null;
   createdAt: number;
+}
+
+/** Per-day nutrient totals (fixed-point milli) for the statistics dashboards. */
+export interface NutritionDayTotals {
+  localDate: string;
+  totalsMilli: Map<string, number>;
+}
+
+/** A logged set flattened for training analytics (volume, e1RM trends). */
+export interface TrainingSetRow {
+  localDate: string;
+  exerciseId: string;
+  loadG: number | null;
+  reps: number | null;
+  setType: string;
+  completed: boolean;
+}
+
+export interface LoggedExercise {
+  id: string;
+  name: string;
 }
 
 export interface LogSetInput {
@@ -304,12 +372,76 @@ export interface RecordStats {
   body: ScopeStats;
 }
 
+/** A saved, versioned nutrition plan (inputs + the computed result). */
+export interface NutritionPlan {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+  isActive: boolean;
+  sex: Sex;
+  age: number;
+  heightCm: number;
+  weightKg: number;
+  activity: ActivityLevel;
+  goal: Goal;
+  rateKgPerWeek: number;
+  proteinPerKg: number;
+  fatPerKg: number | null;
+  fatPercent: number;
+  bmrKcal: number;
+  tdeeKcal: number;
+  targetKcal: number;
+  proteinG: number;
+  fatG: number;
+  carbG: number;
+  notes: string | null;
+}
+
+export interface NutritionPlanInput {
+  id?: string;
+  sex: Sex;
+  age: number;
+  heightCm: number;
+  weightKg: number;
+  activity: ActivityLevel;
+  goal: Goal;
+  rateKgPerWeek: number;
+  proteinPerKg: number;
+  fatPerKg?: number | null;
+  fatPercent: number;
+  bmrKcal: number;
+  tdeeKcal: number;
+  targetKcal: number;
+  proteinG: number;
+  fatG: number;
+  carbG: number;
+  notes?: string | null;
+}
+
+export type TargetSource = 'manual' | 'plan' | 'seed';
+
+export interface TargetHistoryEntry {
+  id: number;
+  nutrientId: string;
+  targetMilli: Milli | null;
+  effectiveFrom: string;
+  source: TargetSource;
+  createdAt: number;
+}
+
 export interface DataPort {
   getNutrientDefs(): NutrientDef[];
   getTargets(): Map<string, Milli>;
   setTarget(nutrientId: string, targetMilli: Milli | null): void;
   getPreference(key: string, fallback: string): string;
   setPreference(key: string, value: string | readonly string[]): void;
+
+  listNutritionPlans(): NutritionPlan[];
+  getActiveNutritionPlan(): NutritionPlan | null;
+  saveNutritionPlan(input: NutritionPlanInput): string;
+  applyNutritionPlan(id: string, effectiveFrom: string): void;
+  deleteNutritionPlan(id: string): void;
+  getTargetHistory(nutrientId?: string): TargetHistoryEntry[];
 
   searchFoods(query: string, limit?: number, filters?: FoodFilters): FoodSummary[];
   countFoods(query: string, filters?: FoodFilters): number;
@@ -325,6 +457,7 @@ export interface DataPort {
 
   addBodyMetric(input: { metricType: BodyMetricType; value: number; localDate: string; note?: string }): void;
   getBodyMetrics(metricType: BodyMetricType, limit?: number): BodyMetric[];
+  listBodyMetrics(limit?: number): BodyMetric[];
   deleteBodyMetric(id: string): void;
 
   logFood(input: {
@@ -353,6 +486,10 @@ export interface DataPort {
   logSet(workoutExerciseId: string, input: LogSetInput): { setId: string; prs: PRKind[] };
   finishWorkout(workoutId: string): void;
   getWeeklyVolume(fromDate: string, toDate: string, secondaryFactor?: number): Map<string, number>;
+
+  getNutritionDailySince(fromDate: string): NutritionDayTotals[];
+  getTrainingSets(): TrainingSetRow[];
+  listLoggedExercises(): LoggedExercise[];
 
   listRoutines(): RoutineSummary[];
   getRoutine(id: string): RoutineDetail | null;
@@ -422,11 +559,120 @@ export class SqliteRepository implements DataPort {
   }
 
   setTarget(nutrientId: string, targetMilli: Milli | null): void {
+    this.writeTarget(nutrientId, targetMilli, 'manual', todayISO());
+    this.commit();
+  }
+
+  /** Write a target and, only when the value actually changes, log the history. */
+  private writeTarget(nutrientId: string, targetMilli: Milli | null, source: TargetSource, effectiveFrom: string): void {
+    const prev = this.rows<{ target_milli: number | null }>(
+      'SELECT target_milli FROM targets WHERE nutrient_id = ?',
+      [nutrientId],
+    )[0];
+    const changed = !prev ? targetMilli != null : prev.target_milli !== targetMilli;
     this.run(
       `INSERT INTO targets (nutrient_id, target_milli, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(nutrient_id) DO UPDATE SET target_milli = excluded.target_milli, updated_at = excluded.updated_at`,
       [nutrientId, targetMilli, Date.now()],
     );
+    if (changed) {
+      this.run(
+        `INSERT INTO target_history (nutrient_id, target_milli, effective_from, source, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [nutrientId, targetMilli, effectiveFrom, source, Date.now()],
+      );
+    }
+  }
+
+  getTargetHistory(nutrientId?: string): TargetHistoryEntry[] {
+    const rows = nutrientId
+      ? this.rows<Record<string, unknown>>(
+          'SELECT * FROM target_history WHERE nutrient_id = ? ORDER BY effective_from, id',
+          [nutrientId],
+        )
+      : this.rows<Record<string, unknown>>('SELECT * FROM target_history ORDER BY effective_from, id');
+    return rows.map((r) => ({
+      id: Number(r.id),
+      nutrientId: String(r.nutrient_id),
+      targetMilli: (r.target_milli as number | null) ?? null,
+      effectiveFrom: String(r.effective_from),
+      source: r.source as TargetSource,
+      createdAt: Number(r.created_at),
+    }));
+  }
+
+  // ── nutrition plans ──────────────────────────────────────
+  listNutritionPlans(): NutritionPlan[] {
+    return this.rows<Record<string, unknown>>(
+      'SELECT * FROM nutrition_plans ORDER BY is_active DESC, updated_at DESC',
+    ).map(mapNutritionPlan);
+  }
+
+  getActiveNutritionPlan(): NutritionPlan | null {
+    const row = this.rows<Record<string, unknown>>(
+      'SELECT * FROM nutrition_plans WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1',
+    )[0];
+    return row ? mapNutritionPlan(row) : null;
+  }
+
+  saveNutritionPlan(input: NutritionPlanInput): string {
+    const now = Date.now();
+    const id = input.id ?? `np_${uid()}`;
+    const existing = this.rows<{ id: string }>('SELECT id FROM nutrition_plans WHERE id = ?', [id])[0];
+    const cols = [
+      'sex', 'age', 'height_cm', 'weight_kg', 'activity', 'goal', 'rate_kg_per_week',
+      'protein_per_kg', 'fat_per_kg', 'fat_percent', 'bmr_kcal', 'tdee_kcal', 'target_kcal',
+      'protein_g', 'fat_g', 'carb_g', 'notes',
+    ];
+    const values = [
+      input.sex, input.age, input.heightCm, input.weightKg, input.activity, input.goal, input.rateKgPerWeek,
+      input.proteinPerKg, input.fatPerKg ?? null, input.fatPercent, input.bmrKcal, input.tdeeKcal, input.targetKcal,
+      input.proteinG, input.fatG, input.carbG, input.notes ?? null,
+    ];
+    if (existing) {
+      this.run(
+        `UPDATE nutrition_plans SET updated_at = ?, ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
+        [now, ...values, id],
+      );
+    } else {
+      this.run(
+        `INSERT INTO nutrition_plans (id, created_at, updated_at, is_active, ${cols.join(', ')})
+         VALUES (?, ?, ?, 0, ${cols.map(() => '?').join(', ')})`,
+        [id, now, now, ...values],
+      );
+    }
+    this.commit();
+    return id;
+  }
+
+  /** Mark a plan active and write its calories/macros into the daily targets. */
+  applyNutritionPlan(id: string, effectiveFrom: string): void {
+    const plan = this.rows<Record<string, unknown>>('SELECT * FROM nutrition_plans WHERE id = ?', [id])[0];
+    if (!plan) return;
+    const p = mapNutritionPlan(plan);
+    const targets: [string, number][] = [
+      ['energy_kcal', toMilli(p.targetKcal)],
+      ['protein_g', toMilli(p.proteinG)],
+      ['fat_g', toMilli(p.fatG)],
+      ['carb_g', toMilli(p.carbG)],
+    ];
+    this.db.run('BEGIN');
+    try {
+      this.run('UPDATE nutrition_plans SET is_active = 0');
+      this.run('UPDATE nutrition_plans SET is_active = 1, updated_at = ? WHERE id = ?', [Date.now(), id]);
+      for (const [nutrientId, milli] of targets) {
+        this.writeTarget(nutrientId, milli, 'plan', effectiveFrom);
+      }
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+  }
+
+  deleteNutritionPlan(id: string): void {
+    this.run('DELETE FROM nutrition_plans WHERE id = ?', [id]);
     this.commit();
   }
 
@@ -902,6 +1148,22 @@ export class SqliteRepository implements DataPort {
   deleteBodyMetric(id: string): void {
     this.run('DELETE FROM body_metrics WHERE id = ?', [id]);
     this.commit();
+  }
+
+  /** All metric entries across every type, newest first. */
+  listBodyMetrics(limit = 300): BodyMetric[] {
+    return this.rows<{ id: string; metric_type: string; value: number; local_date: string; note: string | null; created_at: number }>(
+      `SELECT id, metric_type, value, local_date, note, created_at FROM body_metrics
+       ORDER BY local_date DESC, created_at DESC LIMIT ?`,
+      [limit],
+    ).map((r) => ({
+      id: r.id,
+      metricType: r.metric_type as BodyMetricType,
+      value: r.value,
+      localDate: r.local_date,
+      note: r.note,
+      createdAt: r.created_at,
+    }));
   }
 
   // ── logging ──────────────────────────────────────────────
@@ -1493,6 +1755,67 @@ export class SqliteRepository implements DataPort {
     return workingSetVolumeByMuscle(entries, secondaryFactor);
   }
 
+  // ── statistics ───────────────────────────────────────────
+  /** Known nutrient totals per logged day on/after `fromDate` (unknown excluded). */
+  getNutritionDailySince(fromDate: string): NutritionDayTotals[] {
+    const rows = this.rows<{ d: string; n: string; m: number }>(
+      `SELECT li.local_date AS d, lin.nutrient_id AS n, SUM(lin.amount_milli) AS m
+       FROM log_items li
+       JOIN log_item_nutrients lin ON lin.log_item_id = li.id
+       WHERE li.is_deleted = 0 AND li.local_date >= ?
+         AND lin.amount_milli IS NOT NULL AND lin.was_unknown = 0
+       GROUP BY li.local_date, lin.nutrient_id`,
+      [fromDate],
+    );
+    const byDate = new Map<string, Map<string, number>>();
+    for (const r of rows) {
+      let m = byDate.get(r.d);
+      if (!m) {
+        m = new Map();
+        byDate.set(r.d, m);
+      }
+      m.set(r.n, Number(r.m));
+    }
+    return [...byDate.entries()].map(([localDate, totalsMilli]) => ({ localDate, totalsMilli }));
+  }
+
+  /** Every logged set flattened for analytics, oldest first. */
+  getTrainingSets(): TrainingSetRow[] {
+    return this.rows<{
+      d: string;
+      eid: string;
+      load_g: number | null;
+      reps: number | null;
+      set_type: string;
+      is_completed: number;
+    }>(
+      `SELECT w.local_date AS d, we.exercise_id AS eid, s.load_g, s.reps, s.set_type, s.is_completed
+       FROM sets s
+       JOIN workout_exercises we ON we.id = s.workout_exercise_id
+       JOIN workouts w ON w.id = we.workout_id
+       ORDER BY w.local_date`,
+    ).map((r) => ({
+      localDate: r.d,
+      exerciseId: r.eid,
+      loadG: r.load_g,
+      reps: r.reps,
+      setType: r.set_type,
+      completed: r.is_completed === 1,
+    }));
+  }
+
+  /** Distinct exercises that have at least one completed working set. */
+  listLoggedExercises(): LoggedExercise[] {
+    return this.rows<{ id: string; name: string }>(
+      `SELECT DISTINCT e.id AS id, e.canonical_name AS name
+       FROM exercises e
+       JOIN workout_exercises we ON we.exercise_id = e.id
+       JOIN sets s ON s.workout_exercise_id = we.id
+       WHERE s.is_completed = 1 AND s.set_type = 'working'
+       ORDER BY e.canonical_name`,
+    );
+  }
+
   // ── helpers ──────────────────────────────────────────────
   private buildWorkout(row: {
     id: string;
@@ -1605,6 +1928,40 @@ function mapFood(r: Record<string, unknown>): FoodSummary {
   };
 }
 
+function mapNutritionPlan(r: Record<string, unknown>): NutritionPlan {
+  return {
+    id: r.id as string,
+    createdAt: Number(r.created_at),
+    updatedAt: Number(r.updated_at),
+    isActive: Number(r.is_active) === 1,
+    sex: r.sex as Sex,
+    age: Number(r.age),
+    heightCm: Number(r.height_cm),
+    weightKg: Number(r.weight_kg),
+    activity: r.activity as ActivityLevel,
+    goal: r.goal as Goal,
+    rateKgPerWeek: Number(r.rate_kg_per_week),
+    proteinPerKg: Number(r.protein_per_kg),
+    fatPerKg: r.fat_per_kg == null ? null : Number(r.fat_per_kg),
+    fatPercent: Number(r.fat_percent),
+    bmrKcal: Number(r.bmr_kcal),
+    tdeeKcal: Number(r.tdee_kcal),
+    targetKcal: Number(r.target_kcal),
+    proteinG: Number(r.protein_g),
+    fatG: Number(r.fat_g),
+    carbG: Number(r.carb_g),
+    notes: (r.notes as string) ?? null,
+  };
+}
+
+/** Local calendar date (YYYY-MM-DD) for the given instant, in the local zone. */
+function todayISO(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // Vocabulary lists used for facets. Fixed ids (real schema values); displayed
 // names come from the schema vocabulary tables at runtime where possible and
 // from app-authored labels otherwise. Kept in sync with db/schema.sql + db/seed.sql.
@@ -1697,14 +2054,33 @@ export const MUSCLE_COUNTS_VOCAB: [string, string][] = [
   ['abductors', 'Abductors'],
 ];
 
-// Body metrics the user can log in the Metrics tab.
+// Body metrics the user can log (Metrics tab / Body section).
 export const BODY_METRIC_TYPES: [BodyMetricType, string][] = [
   ['weight_kg', 'Weight (kg)'],
   ['body_fat_pct', 'Body fat (%)'],
   ['height_cm', 'Height (cm)'],
+  ['neck_cm', 'Neck (cm)'],
+  ['chest_cm', 'Chest (cm)'],
   ['waist_cm', 'Waist (cm)'],
+  ['hips_cm', 'Hips (cm)'],
+  ['thigh_cm', 'Thigh (cm)'],
+  ['arm_cm', 'Arm (cm)'],
+  ['calf_cm', 'Calf (cm)'],
   ['other', 'Other'],
 ];
+
+/** Display unit for a stored body-metric value (weight is kg, lengths cm). */
+export function bodyMetricUnit(type: BodyMetricType): string {
+  if (type === 'weight_kg') return 'kg';
+  if (type === 'body_fat_pct') return '%';
+  if (type === 'other') return '';
+  return 'cm';
+}
+
+/** Whether a metric is a body weight (affects kg↔lb display conversion). */
+export function isWeightMetric(type: BodyMetricType): boolean {
+  return type === 'weight_kg';
+}
 
 /** WHERE fragment + params for food facet filters against the local foods table. */
 function localFoodFilter(filters?: FoodFilters): { sql: string; params: unknown[] } {
