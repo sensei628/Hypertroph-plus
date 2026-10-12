@@ -48,7 +48,9 @@ export function parseCommit(subject, hash = '') {
 export function groupCommits(commits) {
   const groups = new Map();
   for (const c of commits) {
-    if (c.type === 'chore' && /^release\b/i.test(c.description)) continue; // chore(release): vX
+    const isReleaseBump =
+      c.type === 'chore' && (c.scope === 'release' || /^v?\d+\.\d+\.\d+\s*$/.test(c.description));
+    if (isReleaseBump) continue; // chore(release): vX.Y.Z
     const type = ORDER.includes(c.type) ? c.type : 'other';
     if (!groups.has(type)) groups.set(type, []);
     groups.get(type).push(c);
