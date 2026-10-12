@@ -1,5 +1,25 @@
 apply plugin: 'com.android.application'
 
+// Derive the Android version from the single source of truth (package.json).
+// versionCode must strictly increase per release or Android refuses to install
+// an update over an existing install ("app not installed").
+def packageJson = rootProject.file('../package.json')
+def appVersionName = "1.0"
+def appVersionCode = 1
+try {
+    def pkg = new groovy.json.JsonSlurper().parseText(packageJson.text)
+    if (pkg.version) {
+        appVersionName = pkg.version.toString()
+        def m = (appVersionName =~ /^(\d+)\.(\d+)\.(\d+)/)
+        if (m.find()) {
+            appVersionCode = m.group(1).toInteger() * 10000 + m.group(2).toInteger() * 100 + m.group(3).toInteger()
+        }
+    }
+    logger.lifecycle("hypertroph+: Android versionName=${appVersionName} versionCode=${appVersionCode}")
+} catch (Exception e) {
+    logger.warn("hypertroph+: could not read version from ${packageJson}; using defaults (${appVersionName}/${appVersionCode}): ${e}")
+}
+
 android {
     namespace = "app.hypertrophplus"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +27,8 @@ android {
         applicationId "app.hypertrophplus"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

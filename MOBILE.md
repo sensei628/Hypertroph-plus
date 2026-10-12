@@ -113,11 +113,27 @@ uses the `https` scheme for a secure origin (so `sql.js` WASM behaves like the w
 
 ### Release builds
 
-- **Android:** Android Studio → *Build → Generate Signed Bundle/APK*, or Gradle
-  `./gradlew bundleRelease` after configuring a signing key. Install the `.apk`/`.aab`.
+`versionName` / `versionCode` are derived from `package.json` at Gradle configure time (in
+`android/app/build.gradle`): `versionName` = the `version` field, `versionCode` =
+`major*10000 + minor*100 + patch`. Bumping the version (e.g. `npm run release`) is therefore
+all that is needed for Android to treat a build as an update — Android refuses to install an
+APK whose `versionCode` is not greater than the installed one, so a hardcoded version would
+silently block in-place upgrades.
+
+- **Android:** CI (`.github/workflows/build-android.yml`) builds a debug-signed APK
+  (`assembleDebug`) and a release AAB (`bundleRelease`) on `v*` tags and attaches both to the
+  GitHub Release. Local: `./gradlew assembleDebug` / `bundleRelease`.
 - **iOS:** Xcode → *Product → Archive* → distribute. Requires an Apple Developer account for
   TestFlight/App Store.
 - Run `npm run cap:sync` after every web change so the native projects pick up the new `dist/`.
+
+**Signing (the Android analog of desktop code-signing):** the debug APK is debug-signed and
+sideloads straight over a previous install (same identity), so it is the practical way to
+distribute. The release AAB is **unsigned** — sign it with your own **upload key** before
+publishing (a self-signed key is free; no certificate authority is involved). Generate one with
+`keytool -genkeypair -v -keystore upload.jks -alias upload ...`, then add a `signingConfigs.release`
+block wired to `buildTypes.release` in `android/app/build.gradle`, with the keystore + passwords
+kept out of git (env vars / GitHub secrets in CI). Deferred until store distribution is needed.
 
 ## 9. Testing status (honest)
 
@@ -144,6 +160,9 @@ Studio/Xcode before release. Do not treat the mobile build as device-tested yet.
 - **No native file picker plugin:** import uses the WebView's `<input type="file">`, which is
   sufficient but not a fully native picker.
 - **Large single JS chunk** (~1 MB) — same as the web build; consider code-splitting later.
+- **Unsigned release AAB:** the `.aab` attached to releases is unsigned; sign it with your
+  upload key before Play submission. The debug APK is self-signed and installs over prior
+  versions (see §8).
 - End-to-end device, background/restore, and large-screen/rotation testing still pending.
 
 ## 11. Costs
@@ -161,6 +180,9 @@ the stores; sideloading/local builds are free.
 | Core features offline | Yes — bundled assets, local SQLite, no network |
 | Data stored locally | Yes — on-device SQLite file, no account/server |
 | Persists across restarts/updates | Yes — file-backed store + schema migrations |
+| Android updates install in place | Yes — `versionCode`/`versionName` derived from `package.json` |
+| In-app update check + "what's changed" on mobile | Yes — Settings → App updates downloads the newest APK |
+| Release signing (upload key) | ⚠️ deferred — debug APK sideloads; release AAB needs a key (see §8) |
 | No paid server/cloud | Yes |
 | Regression tests for calculations | Yes (existing suites) + new backup-validation tests |
 | Critical bugs resolved | None known; remaining items are device-build verification |

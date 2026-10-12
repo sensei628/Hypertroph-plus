@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { App as CapApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { loadDatabase, exportDatabaseBytes, flushPersistence, type DB } from '../data/db';
 import { loadRefDatabase } from '../data/refdb';
 import { exportBackup, importBackup } from '../data/backup';
@@ -2816,6 +2817,23 @@ function Settings(props: {
   }, [props, delScope, delMode, delDate]);
 
   const webAvailable = !props.isDesktop && !!props.webUpdate?.hasUpdate;
+  const platform = Capacitor.getPlatform();
+  const isAndroid = platform === 'android';
+  const isNativeMobile = !props.isDesktop && (platform === 'android' || platform === 'ios');
+  const downloadUrl =
+    !props.isDesktop && props.webUpdate
+      ? isAndroid
+        ? props.webUpdate.apkUrl || props.webUpdate.htmlUrl
+        : isNativeMobile
+          ? props.webUpdate.htmlUrl
+          : props.webUpdate.installerUrl || props.webUpdate.htmlUrl
+      : '';
+  const downloadLabel = isAndroid
+    ? 'Download APK'
+    : !isNativeMobile && props.webUpdate?.installerUrl
+      ? 'Download desktop app'
+      : 'Release notes';
+  const showDownload = !props.isDesktop && !!props.webUpdate?.hasUpdate && !!downloadUrl;
   const changelog =
     props.update && (props.update.state === 'available' || props.update.state === 'downloaded')
       ? props.update.notes ?? ''
@@ -3026,7 +3044,9 @@ function Settings(props: {
           <p className="small muted" style={{ marginTop: 8 }}>
             {props.isDesktop
               ? 'Updates download automatically and install the next time you quit. You can also check now.'
-              : 'Check for a newer published version. When one is available, reload to apply it.'}
+              : isNativeMobile
+                ? 'Check for a newer build, then download and install it to update. Your data is kept.'
+                : 'Check for a newer published version. When one is available, reload to apply it.'}
           </p>
           <div className="nav" style={{ marginTop: 10 }}>
             <button
@@ -3035,18 +3055,17 @@ function Settings(props: {
             >
               {props.update?.state === 'checking' ? 'Checking…' : 'Check for updates'}
             </button>
-            {webAvailable && (
+            {webAvailable && !isNativeMobile && (
               <button className="primary" onClick={() => window.location.reload()}>
                 Reload to update
               </button>
             )}
-            {!props.isDesktop && (props.webUpdate?.installerUrl || props.webUpdate?.htmlUrl) && (
+            {showDownload && (
               <button
-                onClick={() =>
-                  window.open(props.webUpdate!.installerUrl || props.webUpdate!.htmlUrl, '_blank', 'noopener')
-                }
+                className={isNativeMobile ? 'primary' : ''}
+                onClick={() => window.open(downloadUrl, '_blank', 'noopener')}
               >
-                {props.webUpdate?.installerUrl ? 'Download desktop app' : 'Release notes'}
+                {downloadLabel}
               </button>
             )}
           </div>

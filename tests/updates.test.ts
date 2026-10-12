@@ -5,6 +5,7 @@ import {
   isNewer,
   parseRelease,
   findInstallerAsset,
+  findApkAsset,
   fetchLatestRelease,
   checkForUpdate,
 } from '../src/domain/updates';
@@ -78,16 +79,37 @@ describe('findInstallerAsset', () => {
   });
 });
 
+describe('findApkAsset', () => {
+  it('picks the Android .apk, ignoring other assets', () => {
+    const info = parseRelease({
+      tag_name: 'v0.2.0',
+      assets: [
+        { name: 'hypertrophplus-0.2.0-setup.exe', browser_download_url: 'https://x/app.exe' },
+        { name: 'latest.yml', browser_download_url: 'https://x/latest.yml' },
+        { name: 'app-debug.apk', browser_download_url: 'https://x/app-debug.apk' },
+      ],
+    });
+    expect(findApkAsset(info)?.url).toBe('https://x/app-debug.apk');
+  });
+
+  it('returns null when there is no apk', () => {
+    expect(findApkAsset(parseRelease({ assets: [{ name: 'app-setup.exe' }] }))).toBeNull();
+  });
+});
+
 describe('fetchLatestRelease / checkForUpdate', () => {
   const release = {
     tag_name: 'v0.3.0',
     name: '0.3.0',
     body: 'New stuff',
     html_url: 'https://example/rel',
-    assets: [{ name: 'hypertrophplus-0.3.0-setup.exe', browser_download_url: 'https://x/setup.exe' }],
+    assets: [
+      { name: 'hypertrophplus-0.3.0-setup.exe', browser_download_url: 'https://x/setup.exe' },
+      { name: 'app-debug.apk', browser_download_url: 'https://x/app-debug.apk' },
+    ],
   };
 
-  it('reports an available update with notes and installer', async () => {
+  it('reports an available update with notes, installer and apk', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify(release), { status: 200 })) as unknown as typeof fetch;
     const r = await checkForUpdate('0.1.0', fetchImpl);
     expect(r).not.toBeNull();
@@ -95,6 +117,7 @@ describe('fetchLatestRelease / checkForUpdate', () => {
     expect(r!.latest).toBe('0.3.0');
     expect(r!.notes).toBe('New stuff');
     expect(r!.installerUrl).toBe('https://x/setup.exe');
+    expect(r!.apkUrl).toBe('https://x/app-debug.apk');
   });
 
   it('reports no update when running the latest', async () => {

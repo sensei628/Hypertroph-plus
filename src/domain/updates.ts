@@ -39,8 +39,10 @@ export interface UpdateCheck {
   hasUpdate: boolean;
   notes: string;
   htmlUrl: string;
-  /** Best download link for an installed desktop app (.exe), if present. */
+  /** Best download link for an installed desktop app (.exe/.msi), if present. */
   installerUrl: string | null;
+  /** Best download link for an Android sideload (.apk), if present. */
+  apkUrl: string | null;
 }
 
 /** Strip a leading "v"/"V" and surrounding whitespace. */
@@ -107,6 +109,11 @@ export function findInstallerAsset(release: ReleaseInfo): ReleaseAsset | null {
   );
 }
 
+/** Pick the Android sideload asset from a release, if present. */
+export function findApkAsset(release: ReleaseInfo): ReleaseAsset | null {
+  return release.assets.find((a) => a.name.toLowerCase().endsWith('.apk')) ?? null;
+}
+
 /**
  * Fetch the latest published release. Resolves to `null` when the repository has
  * no release yet, or when the request fails (offline, rate-limited, …) — an
@@ -145,5 +152,6 @@ export async function checkForUpdate(
     notes: release.notes,
     htmlUrl: release.htmlUrl,
     installerUrl: findInstallerAsset(release)?.url ?? null,
+    apkUrl: findApkAsset(release)?.url ?? null,
   };
 }

@@ -68,9 +68,11 @@ the card shows progress and **what's changed** in the new version.
 
 - **Where your data lives:** the app's private data folder
   (`hypertroph.db`); not visible without root.
-- **Updating:** download and install the newer APK over the existing app (the
-  debug build is self-signed, so it installs straight over the previous one).
-  Your data is preserved.
+- **Updating:** the app checks for a newer release on launch and offers a
+  **Download APK** button in **Settings → App updates** (together with
+  "what's changed"). Download the newer APK and install it over the existing
+  app — the build is self-signed with a stable identity and each release bumps
+  the Android `versionCode`, so it upgrades in place. Your data is preserved.
 
 ---
 
