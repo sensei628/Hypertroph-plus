@@ -429,6 +429,106 @@ export interface TargetHistoryEntry {
   createdAt: number;
 }
 
+export type DietPlanMode = 'whole' | 'protein';
+
+/** A saved diet template: either a full "whole food" plan or a protein rotation. */
+export interface DietPlan {
+  id: string;
+  name: string;
+  mode: DietPlanMode;
+  isActive: boolean;
+  createdAt: number;
+}
+
+export interface DietPlanItem {
+  id: string;
+  planMealId: string;
+  foodId: string;
+  grams: number;
+}
+
+/** A protein source chosen in a "protein focus" plan meal. */
+export interface DietPlanProteinItem {
+  id: string;
+  planMealId: string;
+  proteinSourceId: string;
+  grams: number;
+  sortOrder: number;
+}
+
+/** A meal within a plan. dayOfWeek null = every day; 0=Sun .. 6=Sat. */
+export interface DietPlanMeal {
+  id: string;
+  planId: string;
+  dayOfWeek: number | null;
+  mealType: string;
+  sortOrder: number;
+  items: DietPlanItem[];
+  proteinItems: DietPlanProteinItem[];
+}
+
+/** A diet plan with its meals (and each meal's foods). */
+export interface DietPlanDetail extends DietPlan {
+  meals: DietPlanMeal[];
+}
+
+export interface DietPlanInput {
+  id?: string;
+  name: string;
+  mode: DietPlanMode;
+}
+
+export interface DietPlanMealInput {
+  id?: string;
+  planId: string;
+  dayOfWeek?: number | null;
+  mealType: string;
+  sortOrder?: number;
+  items?: { foodId: string; grams: number }[];
+}
+
+/**
+ * A checked-off plan meal for a given day. `logEntryId` lists the log_items ids
+ * written by the check (stored as a JSON array) so unchecking removes exactly
+ * those entries and daily totals stay correct.
+ */
+export interface DietPlanCheck {
+  id: string;
+  planMealId: string;
+  date: string;
+  checkedAt: number;
+  logEntryId: string[];
+}
+
+/** A protein source (values per 100 g) used by "protein mode" plans. */
+export interface ProteinSource {
+  id: string;
+  name: string;
+  kcal100g: number;
+  protein100g: number;
+  carbs100g: number;
+  fat100g: number;
+  isCustom: boolean;
+}
+
+export interface ProteinSourceInput {
+  name: string;
+  kcal100g: number;
+  protein100g: number;
+  carbs100g: number;
+  fat100g: number;
+}
+
+/** A daily micronutrient reference value; userValue overrides defaultValue. */
+export interface MicroTarget {
+  id: string;
+  key: string;
+  label: string;
+  unit: string;
+  defaultValue: number;
+  userValue: number | null;
+}
+
 export interface DataPort {
   getNutrientDefs(): NutrientDef[];
   getTargets(): Map<string, Milli>;
@@ -442,6 +542,25 @@ export interface DataPort {
   applyNutritionPlan(id: string, effectiveFrom: string): void;
   deleteNutritionPlan(id: string): void;
   getTargetHistory(nutrientId?: string): TargetHistoryEntry[];
+
+  createPlan(input: DietPlanInput): string;
+  listDietPlans(): DietPlan[];
+  getActivePlan(): DietPlanDetail | null;
+  setActivePlan(id: string): void;
+  setPlanMode(id: string, mode: DietPlanMode): void;
+  deletePlan(id: string): void;
+  deletePlanMeal(id: string): void;
+  upsertPlanMeal(input: DietPlanMealInput): string;
+  setPlanItems(planMealId: string, items: { foodId: string; grams: number }[]): void;
+  setPlanProteinItems(planMealId: string, items: { sourceId: string; grams: number }[]): void;
+  toggleMealCheck(planMealId: string, date: string): boolean;
+  getChecksForDate(date: string): DietPlanCheck[];
+  listProteinSources(): ProteinSource[];
+  addCustomProteinSource(input: ProteinSourceInput): string;
+  getMicroTargets(): MicroTarget[];
+  saveMicroTarget(key: string, value: number | null): void;
+  resetMicroTarget(key: string): void;
+  resetAllMicroTargets(): void;
 
   searchFoods(query: string, limit?: number, filters?: FoodFilters): FoodSummary[];
   countFoods(query: string, filters?: FoodFilters): number;
@@ -1164,6 +1283,335 @@ export class SqliteRepository implements DataPort {
       note: r.note,
       createdAt: r.created_at,
     }));
+  }
+
+  // ── diet plans ───────────────────────────────────────────
+  createPlan(input: DietPlanInput): string {
+    const id = input.id ?? `dp_${uid()}`;
+    const existing = this.rows<{ id: string }>('SELECT id FROM diet_plan WHERE id = ?', [id])[0];
+    if (existing) {
+      this.run('UPDATE diet_plan SET name = ?, mode = ? WHERE id = ?', [input.name, input.mode, id]);
+    } else {
+      this.run('INSERT INTO diet_plan (id, name, mode, is_active, created_at) VALUES (?, ?, ?, 0, ?)', [
+        id,
+        input.name,
+        input.mode,
+        Date.now(),
+      ]);
+    }
+    this.commit();
+    return id;
+  }
+
+  getActivePlan(): DietPlanDetail | null {
+    const row = this.rows<Record<string, unknown>>(
+      'SELECT * FROM diet_plan WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1',
+    )[0];
+    if (!row) return null;
+    return { ...mapDietPlan(row), meals: this.mealsForPlan(row.id as string) };
+  }
+
+  listDietPlans(): DietPlan[] {
+    return this.rows<Record<string, unknown>>(
+      'SELECT * FROM diet_plan ORDER BY is_active DESC, created_at DESC',
+    ).map(mapDietPlan);
+  }
+
+  /** Delete a plan and all of its meals/items/checks (log entries are kept). */
+  deletePlan(id: string): void {
+    this.db.run('BEGIN');
+    try {
+      this.run('DELETE FROM diet_plan_item WHERE plan_meal_id IN (SELECT id FROM diet_plan_meal WHERE plan_id = ?)', [id]);
+      this.run('DELETE FROM diet_plan_protein_item WHERE plan_meal_id IN (SELECT id FROM diet_plan_meal WHERE plan_id = ?)', [id]);
+      this.run('DELETE FROM diet_plan_check WHERE plan_meal_id IN (SELECT id FROM diet_plan_meal WHERE plan_id = ?)', [id]);
+      this.run('DELETE FROM diet_plan_meal WHERE plan_id = ?', [id]);
+      this.run('DELETE FROM diet_plan WHERE id = ?', [id]);
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+  }
+
+  /** Delete one meal plus its items/checks (already-logged foods are kept). */
+  deletePlanMeal(id: string): void {
+    this.db.run('BEGIN');
+    try {
+      this.run('DELETE FROM diet_plan_item WHERE plan_meal_id = ?', [id]);
+      this.run('DELETE FROM diet_plan_protein_item WHERE plan_meal_id = ?', [id]);
+      this.run('DELETE FROM diet_plan_check WHERE plan_meal_id = ?', [id]);
+      this.run('DELETE FROM diet_plan_meal WHERE id = ?', [id]);
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+  }
+
+  /** Activate a plan (deactivating the others). No-op for an unknown id. */
+  setActivePlan(id: string): void {
+    const exists = this.rows<{ id: string }>('SELECT id FROM diet_plan WHERE id = ?', [id])[0];
+    if (!exists) return;
+    this.db.run('BEGIN');
+    try {
+      this.run('UPDATE diet_plan SET is_active = 0');
+      this.run('UPDATE diet_plan SET is_active = 1 WHERE id = ?', [id]);
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+  }
+
+  /** Change a plan's mode ('whole' | 'protein'). No-op for an unknown id. */
+  setPlanMode(id: string, mode: DietPlanMode): void {
+    this.run('UPDATE diet_plan SET mode = ? WHERE id = ?', [mode, id]);
+    this.commit();
+  }
+
+  upsertPlanMeal(input: DietPlanMealInput): string {
+    const id = input.id ?? `dpm_${uid()}`;
+    const dayOfWeek = input.dayOfWeek ?? null;
+    const existing = this.rows<{ id: string }>('SELECT id FROM diet_plan_meal WHERE id = ?', [id])[0];
+    if (existing) {
+      this.run('UPDATE diet_plan_meal SET plan_id = ?, day_of_week = ?, meal_type = ?, sort_order = ? WHERE id = ?', [
+        input.planId,
+        dayOfWeek,
+        input.mealType,
+        input.sortOrder ?? 0,
+        id,
+      ]);
+    } else {
+      this.run(
+        'INSERT INTO diet_plan_meal (id, plan_id, day_of_week, meal_type, sort_order) VALUES (?, ?, ?, ?, ?)',
+        [id, input.planId, dayOfWeek, input.mealType, input.sortOrder ?? 0],
+      );
+    }
+    if (input.items) this.setPlanItems(id, input.items);
+    else this.commit();
+    return id;
+  }
+
+  /** Replace a meal's foods wholesale (ordered as given). */
+  setPlanItems(planMealId: string, items: { foodId: string; grams: number }[]): void {
+    this.db.run('BEGIN');
+    try {
+      this.run('DELETE FROM diet_plan_item WHERE plan_meal_id = ?', [planMealId]);
+      for (const item of items) {
+        this.run('INSERT INTO diet_plan_item (id, plan_meal_id, food_id, grams) VALUES (?, ?, ?, ?)', [
+          `dpi_${uid()}`,
+          planMealId,
+          this.resolvePlanFoodId(item.foodId),
+          item.grams,
+        ]);
+      }
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+  }
+
+  /** Replace a meal's protein sources wholesale (protein-focus plans). */
+  setPlanProteinItems(planMealId: string, items: { sourceId: string; grams: number }[]): void {
+    const known = new Set(this.listProteinSources().map((s) => s.id));
+    this.db.run('BEGIN');
+    try {
+      this.run('DELETE FROM diet_plan_protein_item WHERE plan_meal_id = ?', [planMealId]);
+      let order = 0;
+      for (const item of items) {
+        if (!known.has(item.sourceId)) throw new Error(`Unknown protein source: ${item.sourceId}`);
+        this.run(
+          'INSERT INTO diet_plan_protein_item (id, plan_meal_id, protein_source_id, grams, sort_order) VALUES (?, ?, ?, ?, ?)',
+          [`dppi_${uid()}`, planMealId, item.sourceId, item.grams, order++],
+        );
+      }
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+  }
+
+  /**
+   * Toggle a plan meal's check for `date`. Checking writes each of the meal's
+   * foods into the meal log (snapshotting nutrients, exactly like logFood) under
+   * the meal's section; unchecking soft-deletes those same log items. Returns the
+   * new checked state.
+   */
+  toggleMealCheck(planMealId: string, date: string): boolean {
+    const existing = this.rows<{ id: string; log_entry_id: string | null }>(
+      'SELECT id, log_entry_id FROM diet_plan_check WHERE plan_meal_id = ? AND date = ?',
+      [planMealId, date],
+    )[0];
+    if (existing) {
+      const logIds = parseLogIds(existing.log_entry_id);
+      const now = Date.now();
+      this.db.run('BEGIN');
+      try {
+        for (const logId of logIds) {
+          this.run('UPDATE log_items SET is_deleted = 1, updated_at = ? WHERE id = ?', [now, logId]);
+        }
+        this.run('DELETE FROM diet_plan_check WHERE id = ?', [existing.id]);
+        this.db.run('COMMIT');
+      } catch (e) {
+        this.db.run('ROLLBACK');
+        throw e;
+      }
+      this.commit();
+      return false;
+    }
+
+    const meal = this.rows<{ meal_type: string }>('SELECT meal_type FROM diet_plan_meal WHERE id = ?', [planMealId])[0];
+    if (!meal) throw new Error(`Unknown plan meal: ${planMealId}`);
+    const items = this.rows<{ food_id: string; grams: number }>(
+      'SELECT food_id, grams FROM diet_plan_item WHERE plan_meal_id = ? ORDER BY rowid',
+      [planMealId],
+    );
+    const now = Date.now();
+    const logIds: string[] = [];
+    this.db.run('BEGIN');
+    try {
+      this.run('INSERT OR IGNORE INTO log_days (local_date, tz_offset_min) VALUES (?, ?)', [date, 0]);
+      for (const it of items) {
+        const food = this.getFood(it.food_id);
+        if (!food) continue;
+        const foodLike: FoodLike = {
+          id: food.id,
+          name: food.name,
+          basis: food.basis as FoodLike['basis'],
+          nutrients: food.nutrients,
+        };
+        const snap = snapshotLogItem({ food: foodLike, quantityG: it.grams });
+        const logId = `log_${uid()}`;
+        this.run(
+          `INSERT INTO log_items (id, local_date, meal_section, food_id, label, quantity_g, portion_label, source_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [logId, date, meal.meal_type, it.food_id, snap.label, snap.quantityG, null, food.sourceId, now, now],
+        );
+        for (const n of snap.nutrients) {
+          this.run(
+            'INSERT INTO log_item_nutrients (log_item_id, nutrient_id, amount_milli, was_unknown) VALUES (?, ?, ?, ?)',
+            [logId, n.nutrientId, n.amountMilli, n.wasUnknown ? 1 : 0],
+          );
+        }
+        logIds.push(logId);
+      }
+      this.run(
+        'INSERT INTO diet_plan_check (id, plan_meal_id, date, checked_at, log_entry_id) VALUES (?, ?, ?, ?, ?)',
+        [`dpc_${uid()}`, planMealId, date, now, JSON.stringify(logIds)],
+      );
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.commit();
+    return true;
+  }
+
+  getChecksForDate(date: string): DietPlanCheck[] {
+    return this.rows<{ id: string; plan_meal_id: string; date: string; checked_at: number; log_entry_id: string | null }>(
+      'SELECT id, plan_meal_id, date, checked_at, log_entry_id FROM diet_plan_check WHERE date = ? ORDER BY checked_at',
+      [date],
+    ).map((r) => ({
+      id: r.id,
+      planMealId: r.plan_meal_id,
+      date: r.date,
+      checkedAt: r.checked_at,
+      logEntryId: parseLogIds(r.log_entry_id),
+    }));
+  }
+
+  listProteinSources(): ProteinSource[] {
+    return this.rows<Record<string, unknown>>('SELECT * FROM protein_source ORDER BY is_custom, name').map(
+      mapProteinSource,
+    );
+  }
+
+  addCustomProteinSource(input: ProteinSourceInput): string {
+    const id = `ps_${uid()}`;
+    this.run(
+      'INSERT INTO protein_source (id, name, kcal_100g, protein_100g, carbs_100g, fat_100g, is_custom) VALUES (?, ?, ?, ?, ?, ?, 1)',
+      [id, input.name, input.kcal100g, input.protein100g, input.carbs100g, input.fat100g],
+    );
+    this.commit();
+    return id;
+  }
+
+  getMicroTargets(): MicroTarget[] {
+    return this.rows<Record<string, unknown>>('SELECT * FROM micronutrient_target ORDER BY rowid').map((r) => ({
+      id: r.id as string,
+      key: r.key as string,
+      label: r.label as string,
+      unit: r.unit as string,
+      defaultValue: Number(r.default_value),
+      userValue: r.user_value == null ? null : Number(r.user_value),
+    }));
+  }
+
+  /** Set (or clear, with null) a user override for a micronutrient target. */
+  saveMicroTarget(key: string, value: number | null): void {
+    this.run('UPDATE micronutrient_target SET user_value = ? WHERE key = ?', [value, key]);
+    this.commit();
+  }
+
+  resetMicroTarget(key: string): void {
+    this.run('UPDATE micronutrient_target SET user_value = NULL WHERE key = ?', [key]);
+    this.commit();
+  }
+
+  /** Clear every micronutrient override, reverting all rows to their defaults. */
+  resetAllMicroTargets(): void {
+    this.run('UPDATE micronutrient_target SET user_value = NULL');
+    this.commit();
+  }
+
+  private mealsForPlan(planId: string): DietPlanMeal[] {
+    return this.rows<Record<string, unknown>>(
+      'SELECT * FROM diet_plan_meal WHERE plan_id = ? ORDER BY (day_of_week IS NOT NULL), day_of_week, sort_order, rowid',
+      [planId],
+    ).map((m) => {
+      const id = m.id as string;
+      return {
+        id,
+        planId: m.plan_id as string,
+        dayOfWeek: m.day_of_week == null ? null : Number(m.day_of_week),
+        mealType: m.meal_type as string,
+        sortOrder: Number(m.sort_order),
+        items: this.rows<Record<string, unknown>>(
+          'SELECT * FROM diet_plan_item WHERE plan_meal_id = ? ORDER BY rowid',
+          [id],
+        ).map((it) => ({
+          id: it.id as string,
+          planMealId: it.plan_meal_id as string,
+          foodId: it.food_id as string,
+          grams: Number(it.grams),
+        })),
+        proteinItems: this.rows<Record<string, unknown>>(
+          'SELECT * FROM diet_plan_protein_item WHERE plan_meal_id = ? ORDER BY sort_order, rowid',
+          [id],
+        ).map((it) => ({
+          id: it.id as string,
+          planMealId: it.plan_meal_id as string,
+          proteinSourceId: it.protein_source_id as string,
+          grams: Number(it.grams),
+          sortOrder: Number(it.sort_order),
+        })),
+      };
+    });
+  }
+
+  /** Resolve a plan food id to a local foods.id, materializing reference foods. */
+  private resolvePlanFoodId(foodId: string): string {
+    const food = this.getFood(foodId);
+    if (!food) throw new Error(`Unknown food: ${foodId}`);
+    return this.ensureLocalFood(food);
   }
 
   // ── logging ──────────────────────────────────────────────
@@ -1926,6 +2374,39 @@ function mapFood(r: Record<string, unknown>): FoodSummary {
     publishedAt: (r.published_at as string) ?? null,
     matchedAlias: (r.matched_alias as string) ?? null,
   };
+}
+
+function mapDietPlan(r: Record<string, unknown>): DietPlan {
+  return {
+    id: r.id as string,
+    name: r.name as string,
+    mode: r.mode as DietPlanMode,
+    isActive: Number(r.is_active) === 1,
+    createdAt: Number(r.created_at),
+  };
+}
+
+function mapProteinSource(r: Record<string, unknown>): ProteinSource {
+  return {
+    id: r.id as string,
+    name: r.name as string,
+    kcal100g: Number(r.kcal_100g),
+    protein100g: Number(r.protein_100g),
+    carbs100g: Number(r.carbs_100g),
+    fat100g: Number(r.fat_100g),
+    isCustom: Number(r.is_custom) === 1,
+  };
+}
+
+/** Parse the JSON array of log_items ids stored on a diet_plan_check row. */
+function parseLogIds(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 function mapNutritionPlan(r: Record<string, unknown>): NutritionPlan {

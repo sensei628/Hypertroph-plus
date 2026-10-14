@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('desktop', {
   loadDb: () => ipcRenderer.invoke('db:load'),
   saveDb: (bytes) => ipcRenderer.invoke('db:save', bytes),
   resetDb: () => ipcRenderer.invoke('db:reset'),
+  saveBackup: (bytes, defaultName) => ipcRenderer.invoke('backup:save', bytes, defaultName),
+  openBackup: () => ipcRenderer.invoke('backup:open'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   getAppInfo: () => ipcRenderer.invoke('app:info'),
   onUpdateStatus: (cb) => {

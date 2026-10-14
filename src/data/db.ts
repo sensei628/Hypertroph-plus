@@ -374,6 +374,113 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_body_metrics_date ON body_metrics(metric_type, local_date);
     `,
   },
+  {
+    // Diet plans (data layer only; no UI yet). Purely additive: new tables plus
+    // app-authored seed rows for the protein-source reference table and the
+    // daily micronutrient reference targets. Existing tables/data are untouched.
+    // Idempotent (CREATE TABLE IF NOT EXISTS / INSERT OR IGNORE) because a fresh
+    // database already gets these rows from db/schema.sql + db/seed.sql.
+    version: 11,
+    sql: `
+      CREATE TABLE IF NOT EXISTS diet_plan (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        mode       TEXT NOT NULL CHECK (mode IN ('whole','protein')),
+        is_active  INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0,1)),
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_diet_plan_active ON diet_plan(is_active);
+
+      CREATE TABLE IF NOT EXISTS diet_plan_meal (
+        id          TEXT PRIMARY KEY,
+        plan_id     TEXT NOT NULL REFERENCES diet_plan(id) ON DELETE CASCADE,
+        day_of_week INTEGER CHECK (day_of_week IS NULL OR (day_of_week BETWEEN 0 AND 6)),
+        meal_type   TEXT NOT NULL,
+        sort_order  INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_diet_plan_meal_plan ON diet_plan_meal(plan_id, sort_order);
+
+      CREATE TABLE IF NOT EXISTS diet_plan_item (
+        id           TEXT PRIMARY KEY,
+        plan_meal_id TEXT NOT NULL REFERENCES diet_plan_meal(id) ON DELETE CASCADE,
+        food_id      TEXT NOT NULL REFERENCES foods(id),
+        grams        REAL NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_diet_plan_item_meal ON diet_plan_item(plan_meal_id);
+
+      CREATE TABLE IF NOT EXISTS diet_plan_check (
+        id           TEXT PRIMARY KEY,
+        plan_meal_id TEXT NOT NULL REFERENCES diet_plan_meal(id) ON DELETE CASCADE,
+        date         TEXT NOT NULL,
+        checked_at   INTEGER NOT NULL,
+        log_entry_id TEXT,
+        UNIQUE (plan_meal_id, date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_diet_plan_check_date ON diet_plan_check(date);
+
+      CREATE TABLE IF NOT EXISTS protein_source (
+        id           TEXT PRIMARY KEY,
+        name         TEXT NOT NULL,
+        kcal_100g    REAL NOT NULL,
+        protein_100g REAL NOT NULL,
+        carbs_100g   REAL NOT NULL,
+        fat_100g     REAL NOT NULL,
+        is_custom    INTEGER NOT NULL DEFAULT 0 CHECK (is_custom IN (0,1))
+      );
+
+      CREATE TABLE IF NOT EXISTS micronutrient_target (
+        id            TEXT PRIMARY KEY,
+        key           TEXT NOT NULL UNIQUE,
+        label         TEXT NOT NULL,
+        unit          TEXT NOT NULL,
+        default_value REAL NOT NULL,
+        user_value    REAL
+      );
+
+      INSERT OR IGNORE INTO micronutrient_target (id, key, label, unit, default_value, user_value) VALUES
+        ('mt_fiber',       'fiber_g',       'Fiber',       'g',  30,   NULL),
+        ('mt_sodium',      'sodium_mg',     'Sodium',      'mg', 2300, NULL),
+        ('mt_potassium',   'potassium_mg',  'Potassium',   'mg', 3500, NULL),
+        ('mt_calcium',     'calcium_mg',    'Calcium',     'mg', 1000, NULL),
+        ('mt_iron',        'iron_mg',       'Iron',        'mg', 18,   NULL),
+        ('mt_magnesium',   'magnesium_mg',  'Magnesium',   'mg', 400,  NULL),
+        ('mt_zinc',        'zinc_mg',       'Zinc',        'mg', 11,   NULL),
+        ('mt_vitamin_a',   'vitamin_a_ug',  'Vitamin A',   'ug', 900,  NULL),
+        ('mt_vitamin_c',   'vitamin_c_mg',  'Vitamin C',   'mg', 90,   NULL),
+        ('mt_vitamin_d',   'vitamin_d_ug',  'Vitamin D',   'ug', 20,   NULL),
+        ('mt_vitamin_b12', 'vitamin_b12_ug','Vitamin B12', 'ug', 2.4,  NULL),
+        ('mt_folate',      'folate_ug',     'Folate',      'ug', 400,  NULL);
+
+      INSERT OR IGNORE INTO protein_source (id, name, kcal_100g, protein_100g, carbs_100g, fat_100g, is_custom) VALUES
+        ('ps_egg',            'Egg',             155, 13,  1.1, 11,   0),
+        ('ps_chicken_breast', 'Chicken breast',  165, 31,  0,   3.6,  0),
+        ('ps_chicken_thigh',  'Chicken thigh',   209, 26,  0,   10.9, 0),
+        ('ps_salmon',         'Salmon',          208, 20,  0,   13.4, 0),
+        ('ps_tuna',           'Tuna',            132, 28,  0,   1.3,  0),
+        ('ps_paneer',         'Paneer',          296, 20,  3.4, 22,   0),
+        ('ps_tofu',           'Tofu',            76,  8,   1.9, 4.8,  0),
+        ('ps_soy_chunks',     'Soy chunks',      336, 52,  33,  0.5,  0),
+        ('ps_greek_yogurt',   'Greek yogurt',    73,  9.9, 3.9, 1.9,  0),
+        ('ps_lentils',        'Lentils, cooked', 116, 9,   20,  0.4,  0),
+        ('ps_whey',           'Whey protein',    400, 80,  8,   5,    0);
+
+      PRAGMA user_version = 11;
+    `,
+  },
+  {
+    version: 12,
+    sql: `
+      CREATE TABLE IF NOT EXISTS diet_plan_protein_item (
+        id                TEXT PRIMARY KEY,
+        plan_meal_id      TEXT NOT NULL REFERENCES diet_plan_meal(id) ON DELETE CASCADE,
+        protein_source_id TEXT NOT NULL REFERENCES protein_source(id),
+        grams             REAL NOT NULL,
+        sort_order        INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_diet_plan_protein_item_meal ON diet_plan_protein_item(plan_meal_id);
+      PRAGMA user_version = 12;
+    `,
+  },
 ];
 
 function applyMigrations(db: DB): boolean {
@@ -421,6 +528,15 @@ function applyMigrations(db: DB): boolean {
     }
   }
   return changed;
+}
+
+/** Highest schema version this build understands. */
+export const LATEST_SCHEMA_VERSION = Math.max(...MIGRATIONS.map((m) => m.version));
+
+/** Bring an already-open database up to the latest schema version (used when
+ * importing older backups). Returns true when any migration was applied. */
+export function migrateToLatest(db: DB): boolean {
+  return applyMigrations(db);
 }
 
 let sqlStatic: SqlJsStatic | null = null;
@@ -477,5 +593,14 @@ export function flushPersistence(): Promise<void> {
 }
 
 export function exportDatabaseBytes(db: DB): Uint8Array {
+  // Flush any pending write-ahead log into the main image so the snapshot is a
+  // complete, self-contained database. sql.js keeps the DB in memory (no WAL), so
+  // this is normally a no-op, but it is harmless and keeps the export correct if
+  // the journal mode ever changes.
+  try {
+    db.run('PRAGMA wal_checkpoint(TRUNCATE)');
+  } catch {
+    /* not in WAL mode — the in-memory image is already complete */
+  }
   return db.export();
 }

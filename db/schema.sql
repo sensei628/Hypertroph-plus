@@ -355,3 +355,79 @@ CREATE TABLE IF NOT EXISTS recent_uses (
   last_used_at INTEGER NOT NULL,
   PRIMARY KEY (entity_type, entity_id)
 );
+
+-- Diet plans: a saved template that is either a full "whole food" plan or a
+-- protein-source rotation. Checking a plan meal writes its foods into the normal
+-- meal log (log_items + nutrient snapshot) so daily totals stay correct;
+-- unchecking removes exactly those entries again.
+CREATE TABLE IF NOT EXISTS diet_plan (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  mode       TEXT NOT NULL CHECK (mode IN ('whole','protein')),
+  is_active  INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0,1)),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_diet_plan_active ON diet_plan(is_active);
+
+-- day_of_week: 0=Sunday .. 6=Saturday, or NULL = every day.
+CREATE TABLE IF NOT EXISTS diet_plan_meal (
+  id          TEXT PRIMARY KEY,
+  plan_id     TEXT NOT NULL REFERENCES diet_plan(id) ON DELETE CASCADE,
+  day_of_week INTEGER CHECK (day_of_week IS NULL OR (day_of_week BETWEEN 0 AND 6)),
+  meal_type   TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_diet_plan_meal_plan ON diet_plan_meal(plan_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS diet_plan_item (
+  id           TEXT PRIMARY KEY,
+  plan_meal_id TEXT NOT NULL REFERENCES diet_plan_meal(id) ON DELETE CASCADE,
+  food_id      TEXT NOT NULL REFERENCES foods(id),
+  grams        REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_diet_plan_item_meal ON diet_plan_item(plan_meal_id);
+
+-- One row per (meal, day) that has been checked off. log_entry_id holds a JSON
+-- array of the log_items ids written for the check, so unchecking can find them.
+CREATE TABLE IF NOT EXISTS diet_plan_check (
+  id           TEXT PRIMARY KEY,
+  plan_meal_id TEXT NOT NULL REFERENCES diet_plan_meal(id) ON DELETE CASCADE,
+  date         TEXT NOT NULL,
+  checked_at   INTEGER NOT NULL,
+  log_entry_id TEXT,
+  UNIQUE (plan_meal_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_diet_plan_check_date ON diet_plan_check(date);
+
+-- Protein-source reference table (values per 100 g); is_custom marks user rows.
+CREATE TABLE IF NOT EXISTS protein_source (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  kcal_100g    REAL NOT NULL,
+  protein_100g REAL NOT NULL,
+  carbs_100g   REAL NOT NULL,
+  fat_100g     REAL NOT NULL,
+  is_custom    INTEGER NOT NULL DEFAULT 0 CHECK (is_custom IN (0,1))
+);
+
+-- Protein-focus plans list protein sources (not full foods) per meal. grams is
+-- the weighed amount of the source; egg-type sources are entered as piece counts
+-- in the UI and stored here as grams (1 piece ≈ 50 g).
+CREATE TABLE IF NOT EXISTS diet_plan_protein_item (
+  id                TEXT PRIMARY KEY,
+  plan_meal_id      TEXT NOT NULL REFERENCES diet_plan_meal(id) ON DELETE CASCADE,
+  protein_source_id TEXT NOT NULL REFERENCES protein_source(id),
+  grams             REAL NOT NULL,
+  sort_order        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_diet_plan_protein_item_meal ON diet_plan_protein_item(plan_meal_id);
+
+-- Daily micronutrient reference values; user_value overrides default_value.
+CREATE TABLE IF NOT EXISTS micronutrient_target (
+  id            TEXT PRIMARY KEY,
+  key           TEXT NOT NULL UNIQUE,
+  label         TEXT NOT NULL,
+  unit          TEXT NOT NULL,
+  default_value REAL NOT NULL,
+  user_value    REAL
+);

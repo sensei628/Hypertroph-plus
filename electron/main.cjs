@@ -6,7 +6,7 @@
 // WASM (file:// URLs cannot be fetched). The SQLite image is persisted to a
 // real file in the OS user-data directory through IPC, and electron-updater
 // keeps already-installed copies current via GitHub Releases.
-const { app, BrowserWindow, protocol, net, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, protocol, net, ipcMain, shell, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
@@ -175,6 +175,58 @@ ipcMain.handle('db:reset', async () => {
 });
 
 ipcMain.handle('app:info', () => ({ version: app.getVersion(), platform: process.platform }));
+
+// Native backup dialogs. The renderer sends the raw image over IPC; the main
+// process owns the OS dialogs and the actual disk write (no native modules).
+function parentWindow() {
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+}
+
+ipcMain.handle('backup:save', async (_event, data, defaultName) => {
+  const buf = toBuffer(data);
+  if (!buf) return { ok: false, error: 'No data to save.' };
+  const suggested = typeof defaultName === 'string' && defaultName ? defaultName : 'nutrition-backup.sqlite';
+  try {
+    const options = {
+      title: 'Save backup',
+      defaultPath: suggested,
+      filters: [
+        { name: 'SQLite database', extensions: ['sqlite'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    };
+    const win = parentWindow();
+    const res = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    await fs.writeFile(res.filePath, buf);
+    return { ok: true, path: res.filePath };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+});
+
+ipcMain.handle('backup:open', async () => {
+  try {
+    const options = {
+      title: 'Open backup',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Backups', extensions: ['sqlite', 'db', 'sql'] },
+        { name: 'SQLite database', extensions: ['sqlite', 'db'] },
+        { name: 'SQL script', extensions: ['sql'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    };
+    const win = parentWindow();
+    const res = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+    const filePath = res.filePaths[0];
+    const buf = await fs.readFile(filePath);
+    return { ok: true, name: path.basename(filePath), data: new Uint8Array(buf) };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+});
 
 ipcMain.handle('updates:check', async () => {
   if (!app.isPackaged) return { ok: false, reason: 'Updates are disabled in development builds.' };

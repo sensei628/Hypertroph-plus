@@ -1999,12 +1999,141 @@ button.list-row:hover:not(:disabled) {
   }
 }
 
+/* ── Diet plan ─────────────────────────────────────────────── */
+.col-span-3 {
+  grid-column: 1 / -1;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.meal-check {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--green-600);
+  cursor: pointer;
+}
+
+.grams-input {
+  width: 76px;
+  text-align: right;
+  padding: 6px 10px;
+}
+
+.gram-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mode-switch {
+  min-width: 220px;
+}
+
+.palette .result .grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.palette .result .ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.micro-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.micro-row:last-of-type {
+  border-bottom: none;
+}
+
+.micro-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.micro-unit {
+  min-width: 34px;
+}
+
+.micro-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* ── Backup info sheet ─────────────────────────────────────── */
+.backup-info-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.backup-info-body {
+  padding: 4px 16px 0;
+}
+
+.backup-info-body section {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.backup-info-body section:last-of-type {
+  border-bottom: none;
+}
+
+.backup-info-body h4 {
+  margin: 0 0 3px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.backup-info-body p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .micro-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .micro-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}
+
 @media (max-width: 760px) {
   .dash {
     grid-template-columns: 1fr;
   }
 
-  .col-span-2 {
+  .col-span-2,
+  .col-span-3 {
     grid-column: auto;
   }
 

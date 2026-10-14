@@ -16,6 +16,21 @@ export type UpdateStatus =
   | { state: 'not-available'; version?: string }
   | { state: 'error'; message: string };
 
+export interface SaveBackupResult {
+  ok: boolean;
+  canceled?: boolean;
+  path?: string;
+  error?: string;
+}
+
+export interface OpenBackupResult {
+  ok: boolean;
+  canceled?: boolean;
+  name?: string;
+  data?: Uint8Array;
+  error?: string;
+}
+
 export interface DesktopBridge {
   /** Read the persisted database image, or null on first launch. */
   loadDb(): Promise<Uint8Array | null>;
@@ -23,6 +38,11 @@ export interface DesktopBridge {
   saveDb(bytes: Uint8Array): Promise<void>;
   /** Delete the persisted database image. */
   resetDb(): Promise<void>;
+  /** Show a native Save As dialog and write the backup image. Optional: older
+   * installed shells predate this method, so callers must feature-detect. */
+  saveBackup?(bytes: Uint8Array, defaultName: string): Promise<SaveBackupResult>;
+  /** Show a native Open dialog and read a backup file. Optional (see above). */
+  openBackup?(): Promise<OpenBackupResult>;
   /** Ask the main process to check for updates now. */
   checkForUpdates(): Promise<{ ok: boolean; reason?: string }>;
   /** App version + platform, for the Settings card. */

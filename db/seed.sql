@@ -168,3 +168,34 @@ INSERT INTO targets (nutrient_id, target_milli, updated_at) VALUES
   ('protein_g', 180000, 1700000000000),
   ('carb_g', 290000, 1700000000000),
   ('fat_g', 73000, 1700000000000);
+
+-- Diet-plan seed data. Standard adult daily reference values (RDA/AI, rounded);
+-- `key` mirrors the nutrient id in `nutrients` where one exists. user_value is
+-- NULL until the user overrides a target, so the effective value is default_value.
+INSERT INTO micronutrient_target (id, key, label, unit, default_value, user_value) VALUES
+  ('mt_fiber',       'fiber_g',       'Fiber',       'g',  30,   NULL),
+  ('mt_sodium',      'sodium_mg',     'Sodium',      'mg', 2300, NULL),
+  ('mt_potassium',   'potassium_mg',  'Potassium',   'mg', 3500, NULL),
+  ('mt_calcium',     'calcium_mg',    'Calcium',     'mg', 1000, NULL),
+  ('mt_iron',        'iron_mg',       'Iron',        'mg', 18,   NULL),
+  ('mt_magnesium',   'magnesium_mg',  'Magnesium',   'mg', 400,  NULL),
+  ('mt_zinc',        'zinc_mg',       'Zinc',        'mg', 11,   NULL),
+  ('mt_vitamin_a',   'vitamin_a_ug',  'Vitamin A',   'ug', 900,  NULL),
+  ('mt_vitamin_c',   'vitamin_c_mg',  'Vitamin C',   'mg', 90,   NULL),
+  ('mt_vitamin_d',   'vitamin_d_ug',  'Vitamin D',   'ug', 20,   NULL),
+  ('mt_vitamin_b12', 'vitamin_b12_ug','Vitamin B12', 'ug', 2.4,  NULL),
+  ('mt_folate',      'folate_ug',     'Folate',      'ug', 400,  NULL);
+
+-- Protein sources, values per 100 g (app-authored, illustrative).
+INSERT INTO protein_source (id, name, kcal_100g, protein_100g, carbs_100g, fat_100g, is_custom) VALUES
+  ('ps_egg',            'Egg',             155, 13,  1.1, 11,   0),
+  ('ps_chicken_breast', 'Chicken breast',  165, 31,  0,   3.6,  0),
+  ('ps_chicken_thigh',  'Chicken thigh',   209, 26,  0,   10.9, 0),
+  ('ps_salmon',         'Salmon',          208, 20,  0,   13.4, 0),
+  ('ps_tuna',           'Tuna',            132, 28,  0,   1.3,  0),
+  ('ps_paneer',         'Paneer',          296, 20,  3.4, 22,   0),
+  ('ps_tofu',           'Tofu',            76,  8,   1.9, 4.8,  0),
+  ('ps_soy_chunks',     'Soy chunks',      336, 52,  33,  0.5,  0),
+  ('ps_greek_yogurt',   'Greek yogurt',    73,  9.9, 3.9, 1.9,  0),
+  ('ps_lentils',        'Lentils, cooked', 116, 9,   20,  0.4,  0),
+  ('ps_whey',           'Whey protein',    400, 80,  8,   5,    0);

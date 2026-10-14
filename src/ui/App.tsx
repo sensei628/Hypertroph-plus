@@ -3,7 +3,16 @@ import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { loadDatabase, exportDatabaseBytes, flushPersistence, type DB } from '../data/db';
 import { loadRefDatabase } from '../data/refdb';
-import { exportBackup, importBackup } from '../data/backup';
+import {
+  exportBackup,
+  exportBackupToFolder,
+  isNativeMobile,
+  importBackup,
+  importSqlBackup,
+  buildAiPrompt,
+  type ExportResult,
+  type ImportMode,
+} from '../data/backup';
 import { getDesktopBridge, type UpdateStatus } from '../desktop';
 import {
   SqliteRepository,
@@ -32,6 +41,14 @@ import {
   type NutritionDayTotals,
   type TrainingSetRow,
   type LoggedExercise,
+  type DietPlan,
+  type DietPlanDetail,
+  type DietPlanMeal,
+  type DietPlanCheck,
+  type DietPlanMode,
+  type ProteinSource,
+  type ProteinSourceInput,
+  type MicroTarget,
 } from '../data/repository';
 import { formatNutrient, toMilli } from '../domain/nutrients';
 import { LogItem, sumNutrients, snapshotLogItem } from '../domain/nutrition';
@@ -61,7 +78,7 @@ import { checkForUpdate, type UpdateCheck } from '../domain/updates';
 import { BarChart, LineChart, StackedBar, Ring } from './charts';
 import { CommandPalette } from './CommandPalette';
 
-type Section = 'nutrition' | 'training' | 'body' | 'stats' | 'settings';
+type Section = 'nutrition' | 'diet' | 'training' | 'body' | 'stats' | 'settings';
 type PaletteMode = 'food' | 'exercise';
 type TrainingMode = 'random' | 'plan';
 interface BuilderExercise {
@@ -99,6 +116,30 @@ function addDays(iso: string, n: number): string {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() + n);
   return toISODate(d);
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall back to a hidden textarea */
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 function weekRange(iso: string): [string, string] {
@@ -140,6 +181,73 @@ function buildMeals(r: SqliteRepository): string[] {
   return out;
 }
 
+const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MEAL_TYPE_OPTIONS = ['breakfast', 'lunch', 'dinner', 'snack'];
+const DIET_MODES: { value: DietPlanMode; label: string }[] = [
+  { value: 'whole', label: 'Whole foods' },
+  { value: 'protein', label: 'Protein rotation' },
+];
+
+// Sum the planned macros for one meal by scaling each food's per-100 g values
+// to the stored grams. Foods that can't be resolved are flagged, never zeroed.
+function plannedMealTotals(meal: DietPlanMeal, getFood: (id: string) => FoodDetail | null) {
+  let kcal = 0;
+  let protein = 0;
+  let carb = 0;
+  let fat = 0;
+  let missing = false;
+  for (const it of meal.items) {
+    const food = getFood(it.foodId);
+    if (!food) {
+      missing = true;
+      continue;
+    }
+    const snap = snapshotLogItem({
+      food: { id: food.id, name: food.name, basis: food.basis as 'per_100g' | 'per_100ml', nutrients: food.nutrients },
+      quantityG: it.grams,
+    });
+    for (const n of snap.nutrients) {
+      const v = n.amountMilli;
+      if (v === null || v === undefined) {
+        missing = true;
+        continue;
+      }
+      if (n.nutrientId === 'energy_kcal') kcal += v;
+      else if (n.nutrientId === 'protein_g') protein += v;
+      else if (n.nutrientId === 'carb_g') carb += v;
+      else if (n.nutrientId === 'fat_g') fat += v;
+    }
+  }
+  return { kcal, protein, carb, fat, missing };
+}
+
+// Editable grams field that keeps the raw text while typing and commits on blur
+// or Enter, so intermediate values ("1." or "") never hit the database.
+function GramsInput({ value, onCommit, step = 5 }: { value: number; onCommit: (v: number) => void; step?: number }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  function commit() {
+    const n = Number(text);
+    if (Number.isFinite(n) && n >= 0) onCommit(n);
+    else setText(String(value));
+  }
+  return (
+    <input
+      className="grams-input"
+      type="number"
+      min={0}
+      step={step}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+      }}
+      aria-label="Grams of this food"
+    />
+  );
+}
+
 export function App() {
   const [repo, setRepo] = useState<SqliteRepository | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -179,6 +287,12 @@ export function App() {
   const [activePlan, setActivePlan] = useState<NutritionPlan | null>(null);
   const [latestWeightKg, setLatestWeightKg] = useState<number | null>(null);
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetric[]>([]);
+  const [dietPlans, setDietPlans] = useState<DietPlan[]>([]);
+  const [dietPlan, setDietPlan] = useState<DietPlanDetail | null>(null);
+  const [dietChecks, setDietChecks] = useState<DietPlanCheck[]>([]);
+  const [dietPickMeal, setDietPickMeal] = useState<string | null>(null);
+  const [proteinSources, setProteinSources] = useState<ProteinSource[]>([]);
+  const [microTargets, setMicroTargets] = useState<MicroTarget[]>([]);
 
   const [palette, setPalette] = useState<PaletteMode | null>(null);
   const [palettePurpose, setPalettePurpose] = useState<'log' | 'builder'>('log');
@@ -222,7 +336,10 @@ export function App() {
         setPinnedExercises(r.getPinnedExercises());
         setNutritionPlans(r.listNutritionPlans());
         setActivePlan(r.getActiveNutritionPlan());
-        setLatestWeightKg(r.getBodyMetrics('weight_kg', 1)[0]?.value ?? null);
+        setDietPlans(r.listDietPlans());
+        setDietPlan(r.getActivePlan());
+        setProteinSources(r.listProteinSources());
+        setMicroTargets(r.getMicroTargets());
         setBodyMetrics(r.listBodyMetrics());
         const savedTheme = r.getPreference('theme', 'dark') === 'dark' ? 'dark' : 'light';
         setTheme(savedTheme);
@@ -249,6 +366,11 @@ export function App() {
     setRecordStats(repo.getRecordStats());
     setNutritionPlans(repo.listNutritionPlans());
     setActivePlan(repo.getActiveNutritionPlan());
+    setDietPlans(repo.listDietPlans());
+    setDietPlan(repo.getActivePlan());
+    setProteinSources(repo.listProteinSources());
+    setMicroTargets(repo.getMicroTargets());
+    setDietChecks(repo.getChecksForDate(date));
     setLatestWeightKg(repo.getBodyMetrics('weight_kg', 1)[0]?.value ?? null);
     setBodyMetrics(repo.listBodyMetrics());
     const [ws, we] = weekRange(date);
@@ -285,24 +407,116 @@ export function App() {
     if (!dbRef.current) return;
     try {
       const how = await exportBackup(exportDatabaseBytes(dbRef.current));
-      setToast(how === 'shared' ? 'Backup ready — choose where to save it' : 'Backup file downloaded');
+      const messages: Record<ExportResult, string> = {
+        saved: 'Backup saved',
+        shared: 'Backup ready — choose where to save it',
+        downloaded: 'Backup file downloaded',
+        cancelled: 'Export cancelled',
+      };
+      setToast(messages[how]);
     } catch (e) {
       setToast(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }, []);
 
-  const handleImportBackup = useCallback(async (file: File) => {
+  // Mobile-only: write the backup straight to the device file area instead of
+  // going through the share sheet.
+  const handleSaveBackupToFolder = useCallback(async () => {
+    if (!dbRef.current) return;
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const report = await importBackup(bytes);
+      const res = await exportBackupToFolder(exportDatabaseBytes(dbRef.current));
+      setToast(res.ok ? 'Backup saved to the app folder' : `Could not save backup: ${res.error ?? 'unknown error'}`);
+    } catch (e) {
+      setToast(`Could not save backup: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, []);
+
+  const runImport = useCallback(async (name: string, bytes: Uint8Array, mode: ImportMode) => {
+    const db = dbRef.current;
+    if (!db) return;
+    if (mode === 'replace') {
+      const confirmed = window.confirm(
+        'Replace ALL current data with this backup?\n\nThe current database will be saved as a safety copy first.',
+      );
+      if (!confirmed) return;
+    }
+    try {
+      const current = exportDatabaseBytes(db);
+      const isSql = /\.sql$/i.test(name);
+      const report = isSql
+        ? await importSqlBackup(new TextDecoder().decode(bytes), mode, current)
+        : await importBackup(bytes, mode, current);
       if (!report.ok) {
         setToast(`Import failed: ${report.error ?? 'invalid backup file'}`);
         return;
       }
-      // importBackup only writes after validation; reload to rebuild from it.
+      const parts: string[] = [];
+      if (report.migratedFrom !== null) parts.push(`upgraded from v${report.migratedFrom}`);
+      if (mode === 'merge') parts.push(`merged ${report.inserted} new · skipped ${report.skipped}`);
+      if (report.safetyCopy) parts.push('safety copy saved');
+      const note = `Import complete${parts.length ? ` — ${parts.join(' · ')}` : ''}`;
+      try {
+        sessionStorage.setItem('hypertroph.flash', note);
+      } catch {
+        /* ignore */
+      }
+      // importBackup only writes after full validation; reload to rebuild from it.
       window.location.reload();
     } catch (e) {
       setToast(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, []);
+
+  const handleImportBackup = useCallback(
+    async (file: File, mode: ImportMode) => {
+      await runImport(file.name, new Uint8Array(await file.arrayBuffer()), mode);
+    },
+    [runImport],
+  );
+
+  // Desktop: prefer the native Open dialog. Anything else (or an older shell
+  // without the bridge method) falls back to the hidden file input.
+  const handleImportBackupRequest = useCallback(
+    async (mode: ImportMode, fallback: () => void) => {
+      if (!desktop?.openBackup) {
+        fallback();
+        return;
+      }
+      try {
+        const res = await desktop.openBackup();
+        if (!res.ok) {
+          if (!res.canceled) setToast(`Import failed: ${res.error ?? 'could not open file'}`);
+          return;
+        }
+        if (!res.data) return;
+        await runImport(res.name ?? 'backup.sqlite', res.data, mode);
+      } catch (e) {
+        setToast(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [desktop, runImport],
+  );
+
+  useEffect(() => {
+    try {
+      const flash = sessionStorage.getItem('hypertroph.flash');
+      if (flash) {
+        sessionStorage.removeItem('hypertroph.flash');
+        setToast(flash);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const handleCopyAiPrompt = useCallback(async () => {
+    if (!dbRef.current) return;
+    try {
+      const prompt = buildAiPrompt(dbRef.current);
+      const ok = await copyText(prompt);
+      setToast(ok ? 'AI prompt copied to clipboard' : 'Copy failed — select the text manually');
+    } catch (e) {
+      setToast(`Copy failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }, []);
 
@@ -423,15 +637,18 @@ export function App() {
   function go(next: Section) {
     setSection(next);
     setPalette(null);
+    setDietPickMeal(null);
   }
 
   function openFoodPalette(meal?: string) {
+    setDietPickMeal(null);
     setPendingMeal(meal);
     setPalettePurpose('log');
     setPalette('food');
   }
 
   function openExercisePalette() {
+    setDietPickMeal(null);
     setPalettePurpose('log');
     setPalette('exercise');
   }
@@ -447,7 +664,25 @@ export function App() {
     setPalette(null);
   }
 
+  // Foods picked while building a diet plan are appended to the open meal
+  // (default 100 g, adjusted inline); otherwise fall through to the log dialog.
+  function pickFood(food: FoodSummary) {
+    if (!repo) return;
+    if (dietPickMeal) {
+      const meal = dietPlan?.meals.find((m) => m.id === dietPickMeal);
+      const items = meal ? meal.items.map((i) => ({ foodId: i.foodId, grams: i.grams })) : [];
+      items.push({ foodId: food.id, grams: 100 });
+      repo.setPlanItems(dietPickMeal, items);
+      setDietPickMeal(null);
+      setPalette(null);
+      refresh();
+      return;
+    }
+    openLog(food);
+  }
+
   function closePalette() {
+    setDietPickMeal(null);
     setPendingMeal(undefined);
     setPalette(null);
     setPalettePurpose('log');
@@ -795,6 +1030,112 @@ export function App() {
     setToast('Plan deleted');
   }
 
+  function createDietPlan(name: string, mode: DietPlanMode) {
+    if (!repo) return;
+    const id = repo.createPlan({ name, mode });
+    repo.setActivePlan(id);
+    refresh();
+    setToast('Diet plan created');
+  }
+
+  function selectDietPlan(id: string) {
+    if (!repo) return;
+    repo.setActivePlan(id);
+    refresh();
+  }
+
+  function deleteDietPlan(id: string) {
+    if (!repo) return;
+    if (!window.confirm('Delete this diet plan? Logged foods are kept.')) return;
+    repo.deletePlan(id);
+    refresh();
+    setToast('Diet plan deleted');
+  }
+
+  function addDietMeal() {
+    if (!repo || !dietPlan) return;
+    const nextOrder = dietPlan.meals.reduce((m, meal) => Math.max(m, meal.sortOrder), 0) + 1;
+    repo.upsertPlanMeal({ planId: dietPlan.id, mealType: 'breakfast', dayOfWeek: null, sortOrder: nextOrder });
+    refresh();
+  }
+
+  function updateDietMeal(id: string, patch: { mealType?: string; dayOfWeek?: number | null; sortOrder?: number }) {
+    if (!repo || !dietPlan) return;
+    const meal = dietPlan.meals.find((m) => m.id === id);
+    if (!meal) return;
+    repo.upsertPlanMeal({
+      id,
+      planId: dietPlan.id,
+      mealType: patch.mealType ?? meal.mealType,
+      dayOfWeek: patch.dayOfWeek !== undefined ? patch.dayOfWeek : meal.dayOfWeek,
+      sortOrder: patch.sortOrder ?? meal.sortOrder,
+    });
+    refresh();
+  }
+
+  function deleteDietMeal(id: string) {
+    if (!repo) return;
+    repo.deletePlanMeal(id);
+    refresh();
+    setToast('Meal removed');
+  }
+
+  function setDietItems(mealId: string, items: { foodId: string; grams: number }[]) {
+    if (!repo) return;
+    repo.setPlanItems(mealId, items);
+    refresh();
+  }
+
+  function toggleDietCheck(mealId: string) {
+    if (!repo) return;
+    repo.toggleMealCheck(mealId, date);
+    refresh();
+  }
+
+  function addDietFood(mealId: string) {
+    setDietPickMeal(mealId);
+    setPalettePurpose('log');
+    setPalette('food');
+  }
+
+  function setDietPlanMode(mode: DietPlanMode) {
+    if (!repo || !dietPlan) return;
+    repo.setPlanMode(dietPlan.id, mode);
+    refresh();
+  }
+
+  function setDietProteinItems(mealId: string, items: { sourceId: string; grams: number }[]) {
+    if (!repo) return;
+    repo.setPlanProteinItems(mealId, items);
+    refresh();
+  }
+
+  /** Create a custom protein source and return it so callers can select it. */
+  function addProteinSource(input: ProteinSourceInput): ProteinSource | null {
+    if (!repo) return null;
+    const id = repo.addCustomProteinSource(input);
+    refresh();
+    return { id, ...input, isCustom: true };
+  }
+
+  function saveMicroTarget(key: string, value: number) {
+    if (!repo) return;
+    repo.saveMicroTarget(key, value);
+    refresh();
+  }
+
+  function resetMicroTarget(key: string) {
+    if (!repo) return;
+    repo.resetMicroTarget(key);
+    refresh();
+  }
+
+  function resetAllMicroTargets() {
+    if (!repo) return;
+    repo.resetAllMicroTargets();
+    refresh();
+  }
+
   if (error) {
     return (
       <div className="content">
@@ -824,6 +1165,7 @@ export function App() {
         onNavigate={go}
         nutritionCount={dayItems.length}
         trainingCount={activeWorkout?.exercises.length ?? 0}
+        dietCount={dietPlan?.meals.length ?? 0}
       />
 
       <div className="main">
@@ -856,6 +1198,36 @@ export function App() {
               onAddMeal={addMeal}
               onRemoveMeal={removeMeal}
               onCreateCustom={() => setCustomOpen(true)}
+            />
+          )}
+
+          {section === 'diet' && (
+            <DietSection
+              date={date}
+              setDate={setDate}
+              plans={dietPlans}
+              plan={dietPlan}
+              checks={dietChecks}
+              items={dayItems}
+              getFood={getFood}
+              onCreatePlan={createDietPlan}
+              onSelectPlan={selectDietPlan}
+              onDeletePlan={deleteDietPlan}
+              onAddMeal={addDietMeal}
+              onUpdateMeal={updateDietMeal}
+              onDeleteMeal={deleteDietMeal}
+              onSetItems={setDietItems}
+              onAddFood={addDietFood}
+              onToggleCheck={toggleDietCheck}
+              onSetMode={setDietPlanMode}
+              onSetProteinItems={setDietProteinItems}
+              onAddSource={addProteinSource}
+              sources={proteinSources}
+              targets={targets}
+              micros={microTargets}
+              onSaveMicroTarget={saveMicroTarget}
+              onResetMicroTarget={resetMicroTarget}
+              onResetAllMicroTargets={resetAllMicroTargets}
             />
           )}
 
@@ -922,7 +1294,11 @@ export function App() {
               onRecalibrate={recalibratePlan}
               onDeletePlan={deleteNutritionPlan}
               onExportBackup={handleExportBackup}
+              onSaveBackupToFolder={handleSaveBackupToFolder}
+              isMobile={isNativeMobile()}
               onImportBackup={handleImportBackup}
+              onImportBackupRequest={handleImportBackupRequest}
+              onCopyAiPrompt={handleCopyAiPrompt}
               stats={recordStats}
               onCountDelete={(scope, mode, date) => repo.countRecords(scope, mode, date)}
               onDeleteRecords={handleDeleteRecords}
@@ -944,6 +1320,15 @@ export function App() {
           >
             <Icon name="nutrition" />
             Nutrition
+          </button>
+          <button
+            role="tab"
+            aria-selected={section === 'diet'}
+            className={section === 'diet' ? 'active' : ''}
+            onClick={() => go('diet')}
+          >
+            <Icon name="diet" />
+            Diet
           </button>
           <button
             role="tab"
@@ -1005,7 +1390,7 @@ export function App() {
           refLoading={!refReady}
           onToggleFavorite={toggleFavorite}
           onAddBodyMetric={addBodyMetric}
-          onPickFood={openLog}
+          onPickFood={pickFood}
           onPickExercise={pickExercise}
           onClose={closePalette}
         />
@@ -1044,9 +1429,798 @@ export function App() {
 }
 
 // ── Icons (inline SVG, no icon dependency) ──────────────────
+// ── Diet plan ───────────────────────────────────────────────
+const EGG_GRAMS = 50;
+
+function isEggSource(source: ProteinSource | undefined): boolean {
+  return !!source && /egg/i.test(source.name);
+}
+
+function scaleSourceMacros(source: ProteinSource, grams: number) {
+  const f = grams / 100;
+  return {
+    kcal: source.kcal100g * f,
+    protein: source.protein100g * f,
+    carbs: source.carbs100g * f,
+    fat: source.fat100g * f,
+  };
+}
+
+function ProteinSourcePicker({
+  sources,
+  onPick,
+  onAddSource,
+  onClose,
+}: {
+  sources: ProteinSource[];
+  onPick: (source: ProteinSource) => void;
+  onAddSource: (input: ProteinSourceInput) => ProteinSource | null;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const [custom, setCustom] = useState(false);
+  const [name, setName] = useState('');
+  const [kcal, setKcal] = useState('');
+  const [protein, setProtein] = useState('');
+  const [carbs, setCarbs] = useState('');
+  const [fat, setFat] = useState('');
+
+  const query = q.trim().toLowerCase();
+  const filtered = sources.filter((s) => s.name.toLowerCase().includes(query));
+
+  function submitCustom() {
+    const n = name.trim();
+    if (!n) return;
+    const created = onAddSource({
+      name: n,
+      kcal100g: Number(kcal) || 0,
+      protein100g: Number(protein) || 0,
+      carbs100g: Number(carbs) || 0,
+      fat100g: Number(fat) || 0,
+    });
+    if (created) onPick(created);
+  }
+
+  return (
+    <div className="palette-overlay" onMouseDown={onClose}>
+      <div className="palette" onMouseDown={(e) => e.stopPropagation()}>
+        <input autoFocus value={q} placeholder="Search protein sources…" onChange={(e) => setQ(e.target.value)} />
+        <div className="results">
+          {custom ? (
+            <div className="metrics-form">
+              <label className="field">
+                <span className="muted small">Name</span>
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Seitan" />
+              </label>
+              <div className="builder-targets">
+                <label>
+                  <span className="muted small">kcal /100g</span>
+                  <input type="number" value={kcal} onChange={(e) => setKcal(e.target.value)} />
+                </label>
+                <label>
+                  <span className="muted small">Protein /100g</span>
+                  <input type="number" value={protein} onChange={(e) => setProtein(e.target.value)} />
+                </label>
+                <label>
+                  <span className="muted small">Carbs /100g</span>
+                  <input type="number" value={carbs} onChange={(e) => setCarbs(e.target.value)} />
+                </label>
+                <label>
+                  <span className="muted small">Fat /100g</span>
+                  <input type="number" value={fat} onChange={(e) => setFat(e.target.value)} />
+                </label>
+              </div>
+              <div className="nav" style={{ justifyContent: 'flex-end' }}>
+                <button className="ghost small" onClick={() => setCustom(false)}>
+                  Back
+                </button>
+                <button className="primary small" onClick={submitCustom} disabled={!name.trim()}>
+                  <Icon name="plus" /> Add &amp; select
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button className="result" onClick={() => setCustom(true)}>
+                <span className="icon-tile soft">
+                  <Icon name="plus" />
+                </span>
+                <span className="grow ellipsis">Custom source…</span>
+              </button>
+              {filtered.map((s) => (
+                <button key={s.id} className="result" onClick={() => onPick(s)}>
+                  <span className="icon-tile soft">
+                    <Icon name="diet" />
+                  </span>
+                  <span className="grow ellipsis">{s.name}</span>
+                  <span className="mono small muted">
+                    {Math.round(s.kcal100g)} kcal · P{Math.round(s.protein100g)} · C{Math.round(s.carbs100g)} · F
+                    {Math.round(s.fat100g)} /100g
+                  </span>
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <p className="muted small" style={{ padding: '12px 16px' }}>
+                  No matching sources.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MicroTargetsPanel({
+  targets,
+  onSave,
+  onReset,
+  onResetAll,
+}: {
+  targets: MicroTarget[];
+  onSave: (key: string, value: number) => void;
+  onReset: (key: string) => void;
+  onResetAll: () => void;
+}) {
+  const editedCount = targets.filter((t) => t.userValue !== null).length;
+
+  function confirmResetAll() {
+    if (editedCount === 0) return;
+    const ok = window.confirm(
+      `Reset all ${editedCount} edited micronutrient target${editedCount === 1 ? '' : 's'} to their defaults?`,
+    );
+    if (ok) onResetAll();
+  }
+
+  return (
+    <div className="dash">
+      <section className="card col-span-3">
+        <div className="card-head">
+          <h3>Micronutrient targets</h3>
+          <button className="ghost small danger" onClick={confirmResetAll} disabled={editedCount === 0}>
+            <Icon name="trash" /> Reset all
+          </button>
+        </div>
+        {targets.length === 0 && <p className="muted small">No micronutrient targets found.</p>}
+        {targets.map((t) => (
+          <MicroTargetRow key={t.key} target={t} onSave={onSave} onReset={onReset} />
+        ))}
+        <p className="muted small" style={{ marginTop: 12 }}>
+          These are daily reference targets only. Values you edit are saved as your personal goals; no intake is tracked here.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function MicroTargetRow({
+  target,
+  onSave,
+  onReset,
+}: {
+  target: MicroTarget;
+  onSave: (key: string, value: number) => void;
+  onReset: (key: string) => void;
+}) {
+  const effective = target.userValue ?? target.defaultValue;
+  const [text, setText] = useState(String(effective));
+  useEffect(() => setText(String(effective)), [effective]);
+
+  const edited = target.userValue !== null;
+  const parsed = Number(text);
+  const valid = text.trim() !== '' && Number.isFinite(parsed) && parsed >= 0;
+  const dirty = valid && parsed !== effective;
+
+  function save() {
+    if (valid) onSave(target.key, parsed);
+  }
+
+  return (
+    <div className="micro-row">
+      <span className="micro-label">
+        {target.label}
+        {edited && <span className="tag">edited</span>}
+      </span>
+      <span className="gram-wrap">
+        <input
+          className="grams-input"
+          type="number"
+          min={0}
+          step="any"
+          value={text}
+          aria-invalid={!valid}
+          aria-label={`${target.label} target in ${target.unit}`}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save();
+          }}
+        />
+        <span className="muted small micro-unit">{target.unit}</span>
+      </span>
+      <span className="micro-actions">
+        <button className="primary small" disabled={!valid || !dirty} onClick={save}>
+          Save
+        </button>
+        <button className="ghost small" disabled={!edited} onClick={() => onReset(target.key)}>
+          Reset to default
+        </button>
+      </span>
+    </div>
+  );
+}
+
+function DietSection(props: {
+  date: string;
+  setDate: (d: string) => void;
+  plans: DietPlan[];
+  plan: DietPlanDetail | null;
+  checks: DietPlanCheck[];
+  items: DayItemRow[];
+  getFood: (id: string) => FoodDetail | null;
+  onCreatePlan: (name: string, mode: DietPlanMode) => void;
+  onSelectPlan: (id: string) => void;
+  onDeletePlan: (id: string) => void;
+  onAddMeal: () => void;
+  onUpdateMeal: (id: string, patch: { mealType?: string; dayOfWeek?: number | null; sortOrder?: number }) => void;
+  onDeleteMeal: (id: string) => void;
+  onSetItems: (mealId: string, items: { foodId: string; grams: number }[]) => void;
+  onAddFood: (mealId: string) => void;
+  onToggleCheck: (mealId: string) => void;
+  onSetMode: (mode: DietPlanMode) => void;
+  onSetProteinItems: (mealId: string, items: { sourceId: string; grams: number }[]) => void;
+  onAddSource: (input: ProteinSourceInput) => ProteinSource | null;
+  sources: ProteinSource[];
+  targets: Map<string, number>;
+  micros: MicroTarget[];
+  onSaveMicroTarget: (key: string, value: number) => void;
+  onResetMicroTarget: (key: string) => void;
+  onResetAllMicroTargets: () => void;
+}) {
+  const [newName, setNewName] = useState('');
+  const [newMode, setNewMode] = useState<DietPlanMode>('whole');
+  const [pickForMeal, setPickForMeal] = useState<string | null>(null);
+  const [view, setView] = useState<'plan' | 'micros'>('plan');
+
+  const meals = props.plan?.meals ?? [];
+  const mode: DietPlanMode = props.plan?.mode ?? 'whole';
+  const isToday = props.date === toISODate(new Date());
+  const dow = new Date(`${props.date}T12:00:00`).getDay();
+  const applicable = meals.filter((m) => m.dayOfWeek === null || m.dayOfWeek === dow);
+  const checkedSet = new Set(props.checks.map((c) => c.planMealId));
+  const completed = applicable.filter((m) => checkedSet.has(m.id)).length;
+  const progressPct = applicable.length > 0 ? (completed / applicable.length) * 100 : 0;
+  const sourceById = useMemo(() => new Map(props.sources.map((s) => [s.id, s])), [props.sources]);
+
+  const logged = useMemo(() => rowsToTotals(props.items), [props.items]);
+  const loggedKcal = logged.get('energy_kcal')?.sumMilli ?? 0;
+  const loggedProtein = logged.get('protein_g')?.sumMilli ?? 0;
+
+  const sortedMeals = useMemo(
+    () =>
+      [...meals].sort((a, b) => {
+        const ad = a.dayOfWeek === null ? -1 : a.dayOfWeek;
+        const bd = b.dayOfWeek === null ? -1 : b.dayOfWeek;
+        if (ad !== bd) return ad - bd;
+        if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+        return a.mealType.localeCompare(b.mealType);
+      }),
+    [meals],
+  );
+
+  function create() {
+    const name = newName.trim();
+    if (!name) return;
+    props.onCreatePlan(name, newMode);
+    setNewName('');
+  }
+
+  function updateItem(meal: DietPlanMeal, index: number, grams: number) {
+    props.onSetItems(
+      meal.id,
+      meal.items.map((it, i) => ({ foodId: it.foodId, grams: i === index ? grams : it.grams })),
+    );
+  }
+
+  function removeItem(meal: DietPlanMeal, index: number) {
+    props.onSetItems(
+      meal.id,
+      meal.items.filter((_, i) => i !== index).map((it) => ({ foodId: it.foodId, grams: it.grams })),
+    );
+  }
+
+  function proteinTotalsFor(meal: DietPlanMeal) {
+    return meal.proteinItems.reduce(
+      (acc, it) => {
+        const s = sourceById.get(it.proteinSourceId);
+        if (!s) return acc;
+        const m = scaleSourceMacros(s, it.grams);
+        return { kcal: acc.kcal + m.kcal, protein: acc.protein + m.protein, carbs: acc.carbs + m.carbs, fat: acc.fat + m.fat };
+      },
+      { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+    );
+  }
+
+  function updateProteinItem(meal: DietPlanMeal, index: number, grams: number) {
+    props.onSetProteinItems(
+      meal.id,
+      meal.proteinItems.map((it, i) => ({ sourceId: it.proteinSourceId, grams: i === index ? grams : it.grams })),
+    );
+  }
+
+  function removeProteinItem(meal: DietPlanMeal, index: number) {
+    props.onSetProteinItems(
+      meal.id,
+      meal.proteinItems.filter((_, i) => i !== index).map((it) => ({ sourceId: it.proteinSourceId, grams: it.grams })),
+    );
+  }
+
+  function addProteinSource(meal: DietPlanMeal, source: ProteinSource) {
+    const grams = isEggSource(source) ? EGG_GRAMS : 100;
+    props.onSetProteinItems(meal.id, [
+      ...meal.proteinItems.map((it) => ({ sourceId: it.proteinSourceId, grams: it.grams })),
+      { sourceId: source.id, grams },
+    ]);
+    setPickForMeal(null);
+  }
+
+  const plannedProtein = applicable.reduce(
+    (acc, meal) => {
+      const t = proteinTotalsFor(meal);
+      return { kcal: acc.kcal + t.kcal, protein: acc.protein + t.protein, carbs: acc.carbs + t.carbs, fat: acc.fat + t.fat };
+    },
+    { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  );
+
+  function macroRow(label: string, unit: string, targetMilli: number | undefined, provided: number) {
+    const target = targetMilli == null ? null : targetMilli / 1000;
+    const rem = target == null ? null : target - provided;
+    const met = rem != null && rem <= 0;
+    const pct = target ? Math.min(100, (provided / target) * 100) : 0;
+    return (
+      <div className="bar-item" key={label}>
+        <div className="row small">
+          <span>{label}</span>
+          <span className="mono">
+            {target == null ? 'no target' : met ? 'target met' : `${Math.round(rem ?? 0)} ${unit} left`}
+          </span>
+        </div>
+        {target != null && (
+          <div className="pill-bar">
+            <span style={{ width: `${pct}%` }} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const targetProteinG = props.targets.get('protein_g') != null ? props.targets.get('protein_g')! / 1000 : null;
+  const proteinMet = targetProteinG != null && plannedProtein.protein >= targetProteinG;
+  const proteinPct = targetProteinG ? Math.min(100, (plannedProtein.protein / targetProteinG) * 100) : 0;
+
+  return (
+    <>
+      <PageHead
+        title="Diet Plan"
+        subtitle={
+          props.plan
+            ? `${props.plan.name} · ${props.plan.mode === 'protein' ? 'protein focus' : 'whole diet'}`
+            : 'No plan yet — create one below'
+        }
+      >
+        <div className="segments" role="tablist" aria-label="Diet view">
+          <button
+            className={`segment ${view === 'plan' ? 'active' : ''}`}
+            aria-selected={view === 'plan'}
+            onClick={() => setView('plan')}
+          >
+            Plan
+          </button>
+          <button
+            className={`segment ${view === 'micros' ? 'active' : ''}`}
+            aria-selected={view === 'micros'}
+            onClick={() => setView('micros')}
+          >
+            Micronutrients
+          </button>
+        </div>
+        {view === 'plan' && (
+          <>
+        <div className="segments mode-switch" role="tablist" aria-label="Diet mode">
+          <button
+            className={`segment ${mode === 'whole' ? 'active' : ''}`}
+            aria-selected={mode === 'whole'}
+            disabled={!props.plan}
+            onClick={() => props.onSetMode('whole')}
+          >
+            Whole diet
+          </button>
+          <button
+            className={`segment ${mode === 'protein' ? 'active' : ''}`}
+            aria-selected={mode === 'protein'}
+            disabled={!props.plan}
+            onClick={() => props.onSetMode('protein')}
+          >
+            Protein focus
+          </button>
+        </div>
+        <div className="date-nav">
+          <button
+            className="icon-circle"
+            aria-label="Previous day"
+            title="Previous day"
+            onClick={() => props.setDate(addDays(props.date, -1))}
+          >
+            <Icon name="chevron-left" />
+          </button>
+          <span className="date-label">{props.date}</span>
+          <button
+            className="icon-circle"
+            aria-label="Next day"
+            title="Next day"
+            onClick={() => props.setDate(addDays(props.date, 1))}
+          >
+            <Icon name="chevron-right" />
+          </button>
+        </div>
+          </>
+        )}
+      </PageHead>
+
+      {view === 'micros' ? (
+        <MicroTargetsPanel
+          targets={props.micros}
+          onSave={props.onSaveMicroTarget}
+          onReset={props.onResetMicroTarget}
+          onResetAll={props.onResetAllMicroTargets}
+        />
+      ) : (
+        <>
+      <div className="dash">
+        <section className="card col-span-2">
+          <div className="card-head">
+            <h3>Diet plan</h3>
+            {props.plan && (
+              <span className="tag">
+                {props.plan.meals.length} meal{props.plan.meals.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+
+          {props.plans.length > 0 && (
+            <div className="row">
+              <label className="field grow">
+                <span className="muted small">Active plan</span>
+                <select value={props.plan?.id ?? ''} onChange={(e) => props.onSelectPlan(e.target.value)}>
+                  {props.plans.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.mode === 'protein' ? 'protein' : 'whole'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {props.plan && (
+                <button className="ghost small danger" onClick={() => props.onDeletePlan(props.plan!.id)}>
+                  <Icon name="trash" /> Delete plan
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="row" style={{ marginTop: 14 }}>
+            <label className="field grow">
+              <span className="muted small">{props.plans.length > 0 ? 'New plan name' : 'Plan name'}</span>
+              <input
+                value={newName}
+                placeholder="e.g. Lean bulk"
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') create();
+                }}
+              />
+            </label>
+            <label className="field">
+              <span className="muted small">Mode</span>
+              <select value={newMode} onChange={(e) => setNewMode(e.target.value as DietPlanMode)}>
+                {DIET_MODES.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="primary small" onClick={create} disabled={!newName.trim()}>
+              <Icon name="plus" /> Create
+            </button>
+          </div>
+          <p className="muted small" style={{ marginTop: 12 }}>
+            A whole-diet plan lists fixed foods with a daily checklist; a protein-focus plan tracks protein sources against
+            your remaining macros. Switch modes any time without losing the other setup.
+          </p>
+        </section>
+
+        {mode === 'whole' && (
+          <section className="card">
+            <div className="card-head">
+              <h3>{isToday ? "Today's progress" : 'Progress'}</h3>
+              <span className="muted small">
+                {completed}/{applicable.length} meals
+              </span>
+            </div>
+            <div className="pill-bar">
+              <span style={{ width: `${progressPct}%` }} />
+            </div>
+            <p className="muted small" style={{ marginTop: 10 }}>
+              {applicable.length === 0
+                ? 'Add meals to the plan to start checking them off.'
+                : `${Math.round(progressPct)}% of ${DOW_LABELS[dow]}'s meals logged from the plan.`}
+            </p>
+            <div className="bar-list" style={{ marginTop: 14 }}>
+              <div className="bar-item">
+                <div className="row small">
+                  <span>Logged {isToday ? 'today' : 'on this day'}</span>
+                  <span className="mono">{formatNutrient(loggedKcal, 'kcal')} kcal</span>
+                </div>
+              </div>
+              <div className="bar-item">
+                <div className="row small">
+                  <span>Protein</span>
+                  <span className="mono">{formatNutrient(loggedProtein, 'g')} g</span>
+                </div>
+              </div>
+            </div>
+            <p className="muted small" style={{ marginTop: 10 }}>
+              Ticking a meal logs its foods to {isToday ? 'today' : props.date} and updates these totals; unticking removes them.
+              Checks are per-day and start empty each morning.
+            </p>
+          </section>
+        )}
+
+        {mode === 'protein' && (
+          <section className="card">
+            <div className="card-head">
+              <h3>Remaining macros</h3>
+              <span className="muted small">daily target − planned</span>
+            </div>
+            <div className="bar-list" style={{ marginTop: 6 }}>
+              {macroRow('Calories', 'kcal', props.targets.get('energy_kcal'), plannedProtein.kcal)}
+              {macroRow('Carbs', 'g', props.targets.get('carb_g'), plannedProtein.carbs)}
+              {macroRow('Fat', 'g', props.targets.get('fat_g'), plannedProtein.fat)}
+              <div className="bar-item">
+                <div className="row small">
+                  <span>Protein</span>
+                  <span className="mono">
+                    {Math.round(plannedProtein.protein)}
+                    {targetProteinG != null ? ` / ${Math.round(targetProteinG)}` : ' / —'} g
+                  </span>
+                </div>
+                <div className="pill-bar">
+                  <span style={{ width: `${proteinPct}%` }} />
+                </div>
+              </div>
+            </div>
+            <p className="muted small" style={{ marginTop: 10 }}>
+              {props.targets.size === 0
+                ? 'Set daily targets in Nutrition to see what is left to hit.'
+                : proteinMet
+                  ? 'Protein target met by these sources.'
+                  : 'Totals are the protein sources scheduled for this day; eggs count as 50 g each.'}
+            </p>
+          </section>
+        )}
+      </div>
+
+      {mode === 'whole' && (
+      <div className="dash">
+        <section className="card col-span-3">
+          <div className="card-head">
+            <h3>{isToday ? "Today's checklist" : `Checklist · ${props.date}`}</h3>
+            <span className="muted small">{DOW_LABELS[dow]}</span>
+          </div>
+          {!props.plan && <p className="muted small">Create a plan to see its checklist.</p>}
+          {props.plan && applicable.length === 0 && (
+            <p className="muted small">No meals scheduled for {DOW_LABELS[dow]}. Add meals in the builder below.</p>
+          )}
+          {applicable.map((meal) => {
+            const checked = checkedSet.has(meal.id);
+            const tot = plannedMealTotals(meal, props.getFood);
+            return (
+              <div className="meal" key={meal.id}>
+                <div className="meal-head row">
+                  <strong className="meal-name">
+                    <input
+                      type="checkbox"
+                      className="meal-check"
+                      checked={checked}
+                      onChange={() => props.onToggleCheck(meal.id)}
+                      aria-label={`Toggle ${cap(meal.mealType)}`}
+                    />
+                    <span className="meal-index">{cap(meal.mealType)}</span>
+                    {meal.dayOfWeek !== null && <span className="tag">{DOW_LABELS[meal.dayOfWeek]}</span>}
+                    {checked ? (
+                      <span className="status-chip done">logged</span>
+                    ) : (
+                      <span className="status-chip miss">pending</span>
+                    )}
+                  </strong>
+                  <span className="muted small mono">
+                    {formatNutrient(tot.kcal, 'kcal')} kcal · P{formatNutrient(tot.protein, 'g')} · C{formatNutrient(tot.carb, 'g')} · F
+                    {formatNutrient(tot.fat, 'g')}
+                    {tot.missing ? ' · partial' : ''}
+                  </span>
+                </div>
+                {meal.items.length === 0 && <p className="muted small">No foods yet.</p>}
+                {meal.items.map((it, index) => {
+                  const food = props.getFood(it.foodId);
+                  return (
+                    <div className="item" key={`${it.foodId}-${index}`}>
+                      <span>{food?.name ?? it.foodId}</span>
+                      <span className="mono small muted">{Math.round(it.grams)} g</span>
+                      <span />
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </section>
+      </div>
+      )}
+
+      <div className="dash">
+        <section className="card col-span-3">
+          <div className="card-head">
+            <h3>{mode === 'protein' ? 'Build the protein rotation' : 'Build the plan'}</h3>
+            <button className="primary small" onClick={props.onAddMeal} disabled={!props.plan}>
+              <Icon name="plus" /> Add meal
+            </button>
+          </div>
+          {!props.plan && <p className="muted small">Create a plan to start building it.</p>}
+          {props.plan && sortedMeals.length === 0 && <p className="muted small">No meals yet — add one above.</p>}
+          {sortedMeals.map((meal) => {
+            const tot = mode === 'protein' ? proteinTotalsFor(meal) : plannedMealTotals(meal, props.getFood);
+            const typeOptions = MEAL_TYPE_OPTIONS.includes(meal.mealType.toLowerCase())
+              ? MEAL_TYPE_OPTIONS
+              : [meal.mealType, ...MEAL_TYPE_OPTIONS];
+            return (
+              <div className="builder-row" key={meal.id}>
+                <div className="builder-row-head">
+                  <span>{cap(meal.mealType)}</span>
+                  <div className="nav">
+                    <span className="muted small mono">
+                      {formatNutrient(tot.kcal, 'kcal')} kcal · P{formatNutrient(tot.protein, 'g')}
+                    </span>
+                    <button className="ghost small danger" onClick={() => props.onDeleteMeal(meal.id)} title="Remove meal">
+                      <Icon name="trash" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="builder-targets">
+                  <label>
+                    <span className="muted small">Type</span>
+                    <select value={meal.mealType} onChange={(e) => props.onUpdateMeal(meal.id, { mealType: e.target.value })}>
+                      {typeOptions.map((t) => (
+                        <option key={t} value={t}>
+                          {cap(t)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="muted small">Day</span>
+                    <select
+                      value={meal.dayOfWeek === null ? 'daily' : String(meal.dayOfWeek)}
+                      onChange={(e) =>
+                        props.onUpdateMeal(meal.id, {
+                          dayOfWeek: e.target.value === 'daily' ? null : Number(e.target.value),
+                        })
+                      }
+                    >
+                      <option value="daily">Every day</option>
+                      {DOW_LABELS.map((d, i) => (
+                        <option key={d} value={String(i)}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="muted small">{mode === 'protein' ? 'Sources' : 'Foods'}</span>
+                    {mode === 'protein' ? (
+                      <button className="ghost small" onClick={() => setPickForMeal(meal.id)}>
+                        <Icon name="plus" /> Add source
+                      </button>
+                    ) : (
+                      <button className="ghost small" onClick={() => props.onAddFood(meal.id)}>
+                        <Icon name="plus" /> Add food
+                      </button>
+                    )}
+                  </label>
+                </div>
+
+                {mode === 'whole' ? (
+                  <div style={{ marginTop: 8 }}>
+                    {meal.items.length === 0 && <p className="muted small">No foods — add some.</p>}
+                    {meal.items.map((it, index) => {
+                      const food = props.getFood(it.foodId);
+                      return (
+                        <div className="item" key={`${it.foodId}-${index}`}>
+                          <span>{food?.name ?? it.foodId}</span>
+                          <span className="gram-wrap">
+                            <GramsInput value={it.grams} onCommit={(g) => updateItem(meal, index, g)} />
+                            <span className="muted small">g</span>
+                          </span>
+                          <button className="ghost small danger" onClick={() => removeItem(meal, index)} title="Remove food">
+                            <Icon name="trash" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 8 }}>
+                    {meal.proteinItems.length === 0 && <p className="muted small">No sources — add some.</p>}
+                    {meal.proteinItems.map((it, index) => {
+                      const s = sourceById.get(it.proteinSourceId);
+                      const egg = isEggSource(s);
+                      return (
+                        <div className="item" key={`${it.proteinSourceId}-${index}`}>
+                          <span>
+                            {s?.name ?? it.proteinSourceId}
+                            {s && <span className="muted small"> · {Math.round(s.kcal100g)} kcal/100g</span>}
+                          </span>
+                          <span className="gram-wrap">
+                            <GramsInput
+                              value={egg ? it.grams / EGG_GRAMS : it.grams}
+                              step={egg ? 1 : 5}
+                              onCommit={(v) => updateProteinItem(meal, index, egg ? v * EGG_GRAMS : v)}
+                            />
+                            <span className="muted small">{egg ? 'pcs' : 'g'}</span>
+                          </span>
+                          <button className="ghost small danger" onClick={() => removeProteinItem(meal, index)} title="Remove source">
+                            <Icon name="trash" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {props.plan && props.plan.meals.length > 0 && (
+            <p className="muted small" style={{ marginTop: 12 }}>
+              {mode === 'protein'
+                ? 'Sources are stored as grams (eggs as 50 g pieces). Switch to Whole diet to log exact foods.'
+                : 'Weights are grams of the food as stored. Ticking a meal in the checklist logs these exact amounts to that day.'}
+            </p>
+          )}
+        </section>
+      </div>
+        </>
+      )}
+
+      {pickForMeal && (
+        <ProteinSourcePicker
+          sources={props.sources}
+          onPick={(s) => {
+            const meal = meals.find((m) => m.id === pickForMeal);
+            if (meal) addProteinSource(meal, s);
+            else setPickForMeal(null);
+          }}
+          onAddSource={props.onAddSource}
+          onClose={() => setPickForMeal(null)}
+        />
+      )}
+    </>
+  );
+}
+
 type IconName =
   | 'bolt'
   | 'nutrition'
+  | 'diet'
   | 'training'
   | 'settings'
   | 'search'
@@ -1063,7 +2237,10 @@ type IconName =
   | 'stop'
   | 'target'
   | 'activity'
-  | 'stats';
+  | 'stats'
+  | 'info'
+  | 'copy'
+  | 'close';
 
 function Icon({ name, className }: { name: IconName; className?: string }) {
   let body: ReactNode = null;
@@ -1076,6 +2253,16 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
         <>
           <path d="M12 8c0-3 2-5 5-5 0 3-2 5-5 5Z" />
           <path d="M12 8c-2-2-5-2-7 0-2 2-2 6 0 9 1.5 2.2 3 4 4 4s1.5-1 3-1 2 1 3 1 2.5-1.8 4-4c2-3 2-7 0-9-2-2-5-2-7 0Z" />
+        </>
+      );
+      break;
+    case 'diet':
+      body = (
+        <>
+          <rect x="5" y="4" width="14" height="17" rx="2" />
+          <path d="M9 3h6v3H9z" />
+          <path d="m8.5 11.5 1.5 1.5 3-3" />
+          <path d="M8.5 17h7" />
         </>
       );
       break;
@@ -1166,6 +2353,26 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
         </>
       );
       break;
+    case 'info':
+      body = (
+        <>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v5" />
+          <path d="M12 7.6h.01" />
+        </>
+      );
+      break;
+    case 'copy':
+      body = (
+        <>
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2" />
+        </>
+      );
+      break;
+    case 'close':
+      body = <path d="M6 6l12 12M18 6 6 18" />;
+      break;
   }
   return (
     <svg
@@ -1189,11 +2396,13 @@ function Sidebar({
   onNavigate,
   nutritionCount,
   trainingCount,
+  dietCount,
 }: {
   section: Section;
   onNavigate: (s: Section) => void;
   nutritionCount: number;
   trainingCount: number;
+  dietCount: number;
 }) {
   return (
     <aside className="sidebar">
@@ -1215,6 +2424,14 @@ function Sidebar({
         >
           <Icon name="nutrition" className="nav-icon" /> Nutrition
           {nutritionCount > 0 && <span className="nav-badge">{nutritionCount}</span>}
+        </button>
+        <button
+          className={`nav-item ${section === 'diet' ? 'active' : ''}`}
+          aria-current={section === 'diet' ? 'page' : undefined}
+          onClick={() => onNavigate('diet')}
+        >
+          <Icon name="diet" className="nav-icon" /> Diet Plan
+          {dietCount > 0 && <span className="nav-badge">{dietCount}</span>}
         </button>
         <button
           className={`nav-item ${section === 'training' ? 'active' : ''}`}
@@ -2793,7 +4010,11 @@ function Settings(props: {
   onRecalibrate: (observedMaintenanceKcal: number) => void;
   onDeletePlan: (id: string) => void;
   onExportBackup: () => void;
-  onImportBackup: (file: File) => void;
+  onSaveBackupToFolder: () => void;
+  isMobile: boolean;
+  onImportBackup: (file: File, mode: ImportMode) => void;
+  onImportBackupRequest: (mode: ImportMode, fallback: () => void) => void;
+  onCopyAiPrompt: () => void;
   stats: RecordStats;
   onCountDelete: (scope: DeleteScope, mode: DeleteMode, date?: string) => number;
   onDeleteRecords: (scope: DeleteScope, mode: DeleteMode, date?: string) => void;
@@ -2804,6 +4025,8 @@ function Settings(props: {
   onCheckUpdates: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [importMode, setImportMode] = useState<ImportMode>('merge');
+  const [backupInfo, setBackupInfo] = useState(false);
   const [delScope, setDelScope] = useState<DeleteScope>('nutrition');
   const [delMode, setDelMode] = useState<DeleteMode>('before');
   const [delDate, setDelDate] = useState<string>(toISODate(new Date()));
@@ -2917,7 +4140,12 @@ function Settings(props: {
         </div>
 
         <div className="card">
-          <h3>Backup &amp; restore</h3>
+          <div className="card-head" style={{ marginBottom: 8 }}>
+            <h3>Backup &amp; restore</h3>
+            <button className="ghost small" onClick={() => setBackupInfo(true)} title="About backup &amp; restore" aria-label="About backup and restore">
+              <Icon name="info" />
+            </button>
+          </div>
           <p className="small muted">
             Your records live only on this device. Export a portable backup file regularly and keep it somewhere safe — if the app
             is uninstalled or the device is lost without a backup, the data cannot be recovered.
@@ -2926,15 +4154,49 @@ function Settings(props: {
             <button className="primary" onClick={props.onExportBackup}>
               Export backup
             </button>
-            <button onClick={() => fileRef.current?.click()}>Import backup…</button>
+            {props.isMobile && (
+              <button className="ghost" onClick={props.onSaveBackupToFolder}>
+                Save to folder…
+              </button>
+            )}
+          </div>
+          <div className="segments" role="tablist" aria-label="Import mode" style={{ margin: '14px 0 8px' }}>
+            <button
+              type="button"
+              className={`segment ${importMode === 'merge' ? 'active' : ''}`}
+              role="tab"
+              aria-selected={importMode === 'merge'}
+              onClick={() => setImportMode('merge')}
+            >
+              Merge
+            </button>
+            <button
+              type="button"
+              className={`segment ${importMode === 'replace' ? 'active' : ''}`}
+              role="tab"
+              aria-selected={importMode === 'replace'}
+              onClick={() => setImportMode('replace')}
+            >
+              Replace everything
+            </button>
+          </div>
+          <p className="small muted">
+            {importMode === 'merge'
+              ? 'Adds records from the file and skips ones you already have. Nothing is deleted.'
+              : 'Replaces all current data with the file. A safety copy of the current database is saved first.'}
+          </p>
+          <div className="nav" style={{ marginTop: 10 }}>
+            <button onClick={() => props.onImportBackupRequest(importMode, () => fileRef.current?.click())}>
+              Import backup…
+            </button>
             <input
               ref={fileRef}
               type="file"
-              accept=".sqlite,.db,application/vnd.sqlite3,application/octet-stream"
+              accept=".sqlite,.db,.sql,application/vnd.sqlite3,application/sql,text/plain,application/octet-stream"
               hidden
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) props.onImportBackup(f);
+                if (f) props.onImportBackup(f, importMode);
                 e.target.value = '';
               }}
             />
@@ -3082,7 +4344,71 @@ function Settings(props: {
           )}
         </div>
       </div>
+
+      {backupInfo && <BackupInfoDialog onClose={() => setBackupInfo(false)} onCopyPrompt={props.onCopyAiPrompt} />}
     </>
+  );
+}
+
+function BackupInfoDialog(props: { onClose: () => void; onCopyPrompt: () => void }) {
+  return (
+    <div className="palette-overlay" onMouseDown={props.onClose}>
+      <div className="palette backup-info" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="backup-info-head">
+          <strong>Backup &amp; restore</strong>
+          <button className="ghost small" onClick={props.onClose} aria-label="Close">
+            <Icon name="close" />
+          </button>
+        </div>
+        <div className="results backup-info-body">
+          <section>
+            <h4>What you can export</h4>
+            <p className="small muted">
+              One portable <span className="mono">.sqlite</span> file with everything you’ve entered: foods, daily logs, diet
+              plans, protein sources, micronutrient targets and your profile/settings. It’s a lossless snapshot you can keep
+              anywhere.
+            </p>
+          </section>
+          <section>
+            <h4>What you can import</h4>
+            <p className="small muted">
+              Any <span className="mono">.sqlite</span> file that matches the app schema — one of your own exports, or one made
+              elsewhere (including by an AI). The file is checked first: its schema version and structure must match, older
+              versions are upgraded automatically, and files from a newer app version are refused.
+            </p>
+          </section>
+          <section>
+            <h4>How to get one</h4>
+            <p className="small muted">
+              Export from the app, or ask any AI assistant to build one. The button below copies a ready-to-paste prompt that
+              already contains this app’s exact schema, its schema version and the insert format — just describe the meal plan
+              you want at the end.
+            </p>
+          </section>
+          <section>
+            <h4>No binary file? Use SQL</h4>
+            <p className="small muted">
+              If the AI can only return text, ask for a <span className="mono">.sql</span> script instead. You can import{' '}
+              <span className="mono">.sql</span> too — it runs against a throwaway database and then goes through the exact same
+              validation as a binary backup.
+            </p>
+          </section>
+          <section>
+            <h4>Keep it safe</h4>
+            <p className="small muted">
+              <strong>Replace everything</strong> overwrites all current data (a safety copy is saved automatically first).{' '}
+              <strong>Merge</strong> only adds records you don’t already have. Either way, keep your own backups — this device is
+              the only copy.
+            </p>
+          </section>
+          <div className="nav" style={{ justifyContent: 'flex-end', padding: '4px 16px 14px' }}>
+            <button className="primary" onClick={props.onCopyPrompt}>
+              <Icon name="copy" /> Copy AI prompt
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
